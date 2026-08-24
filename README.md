@@ -256,7 +256,7 @@ operator_io --TCP client--> simulator_io
 
 顶层 `simu_time` 是模拟器返回的权威时钟，即使 YC/YX 查询数组为空也必须存在。Bridge 不得用请求中的建议时刻或本机墙钟补造该字段；收到成功响应后把它原样写入 `operator_control.data_time_curr`。点内 `time` 是该点自身的数据时刻，只有 `0 < time <= simu_time` 的项才更新本地已有 YC/YX；`time=0` 占位只用于保持位置，不产生业务响应。Bridge 根据原请求数组的位置恢复本地点号，只修改本地已有点的 `value/time`，绝不修改 `pnt_no/name`。RTU `refresh_time` 写本次成功交换的 Unix 墙钟，三种时刻语义不得混用。真实模拟器与开发 Mock 均使用 `data.yc/data.yx` 的相同位置协议。
 
-新版模拟器响应还会成组返回 `run_seq`、`simu_time_start`、`simu_status` 和 `runtime_ready`。`run_seq` 是权威任务身份：序号变化时，即使新任务时刻前进或不变，也必须停止 Core 并清理旧任务运行数据。只有 `runtime_ready=true` 且本包至少包含一个正时标、非空值的 YC/YX，才认为首个有效断面已经就绪；在此之前 EMS 只同步任务元数据和包级时刻，Core 保持停止。首断面提交后再恢复 Core。完全不含 `run_seq` 的旧模拟器和开发 Mock 继续使用原有时钟回退兼容逻辑。
+新版模拟器和项目 Mock 会成组返回 `run_seq`、`simu_time_start`、`simu_status` 和 `runtime_ready`。`run_seq` 是权威任务身份：序号变化时，即使新任务时刻前进或不变，也必须停止 Core 并清理旧任务运行数据。只有 `runtime_ready=true` 且本包至少包含一个正时标、非空值的 YC/YX，才认为首个有效断面已经就绪；在此之前 EMS 只同步任务元数据和包级时刻，Core 保持停止。首断面提交后再恢复 Core。完全不含 `run_seq` 的旧对端继续使用原有时钟回退兼容逻辑。Mock 对写请求校验 `run_seq`，拒绝来自旧任务的迟到命令。
 
 当 `run_seq` 变化，或同一任务的响应满足 `simu_time < operator_control.data_time_curr` 时，Bridge 必须严格执行以下恢复顺序：
 
@@ -274,6 +274,7 @@ Bridge 每 1 秒检查一次变化的 YT/YK，并发送：
 ```json
 {
   "action": "write",
+  "run_seq": 7,
   "data": {
     "yt": [{"pnt_no":200001,"name":"dev_wind_gen.1.p_set","value":62.5,"time":10}],
     "yk": [{"pnt_no":200001,"name":"dev_wind_gen.1.status","value":1,"time":10}]
@@ -281,7 +282,7 @@ Bridge 每 1 秒检查一次变化的 YT/YK，并发送：
 }
 ```
 
-Bridge 在组装载荷时会再次比较 YK 目标值与最新有效 YX；同点号 YX 优先，其次匹配同名状态点，最后回退到设备表。状态一致或无法确认当前状态的 YK 不下发。只有收到 `{"ok":true}` 后才推进已发送命令游标，失败时保留命令供下次重试；已确认不需要动作的 YK 可以安全越过。成功的数据读取在一个短事务内更新 YC/YX、RTU 和权威数据时钟，并将 RTU 状态置为 1；缺少 `simu_time`、读取或写入连接失败时立即把状态置为 0，但保留最后一次成功刷新时刻。
+Bridge 在组装载荷时会再次比较 YK 目标值与最新有效 YX；同点号 YX 优先，其次匹配同名状态点，最后回退到设备表。状态一致或无法确认当前状态的 YK 不下发。每个非空写请求携带当前 `source_run_seq`，防止旧任务命令误发到新任务。只有响应为对象、明确 `{"ok":true}` 且没有非空 `rejected` 时才推进已发送命令游标；失败或部分拒绝时保留整批命令供下次重试。已确认不需要动作的 YK 可以安全越过。成功的数据读取在一个短事务内更新 YC/YX、RTU 和权威数据时钟，并将 RTU 状态置为 1；缺少 `simu_time`、读取或写入连接失败时立即把状态置为 0，但保留最后一次成功刷新时刻。
 
 四遥协议同样执行 `time > 0` 业务有效性边界，但“返回位置”和“业务响应”必须区分：YC/YX 读取时 `time=0` 项仍须按原位置返回，Bridge 收到后只忽略该项本身，不能删除它或让后续项错位；YT/YK 则只有 `time > 0` 才能发送或执行。YK 还必须满足目标状态与当前状态不同。YT 每个闭环决策周期都会获得新时标；YK 在状态差异持续存在时也会获得新时标，两者都不以旧命令值是否相同作为时标刷新条件。偏航角设定和桨距角设定 YT 会在发送出口再次过滤。即使调用方传入负游标，也会按 0 作为有效命令下界。Mock 忽略 `time <= 0` 的控制项，并且只把有效项计入接收数量。
 

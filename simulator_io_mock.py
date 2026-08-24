@@ -14,10 +14,22 @@ LOGGER = logging.getLogger(__name__)
 class SimulatorState:
     """Small in-memory peer used to demonstrate the operator_io bridge."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        run_seq: int = 1,
+        simu_status: int = 1,
+        simu_time_start: int = 0,
+        runtime_ready: bool = True,
+    ) -> None:
         self._lock = threading.Lock()
         self._setpoints: dict[str, float] = {}
         self._statuses: dict[str, int] = {}
+        self.run_seq = max(0, int(run_seq))
+        self.simu_status = int(simu_status)
+        self.simu_time_start = max(0, int(simu_time_start))
+        self.runtime_ready = bool(runtime_ready)
+        self.simu_time_curr = self.simu_time_start
 
     def _read_response(self, request: dict[str, Any]) -> dict[str, Any]:
         current_time = max(0, int(request.get("simu_time", 0)))
@@ -40,6 +52,11 @@ class SimulatorState:
         irradiance = round(max(0.0, 780.0 * math.sin(math.pi * (current_time % 86_400) / 86_400.0)), 3)
         ambient_temperature = round(20.0 + 6.0 * math.sin(day_angle - math.pi / 2.0), 3)
         with self._lock:
+            self.simu_time_curr = current_time
+            run_seq = self.run_seq
+            simu_status = self.simu_status
+            simu_time_start = self.simu_time_start
+            runtime_ready = self.runtime_ready
             values = {
                 "dev_diesal_gen.1.p_curr": self._setpoints.get(
                     "dev_diesal_gen.1.p_set", 25.0
@@ -125,6 +142,10 @@ class SimulatorState:
 
         return {
             "ok": True,
+            "run_seq": run_seq,
+            "simu_status": simu_status,
+            "simu_time_start": simu_time_start,
+            "runtime_ready": runtime_ready,
             "simu_time": current_time,
             "data": {
                 "yc": value_time_rows("yc", yc_rows, requested_yc),
@@ -143,6 +164,24 @@ class SimulatorState:
         valid_yt_rows = self._valid_command_rows(yt_rows)
         valid_yk_rows = self._valid_command_rows(yk_rows)
         with self._lock:
+            request_run_seq = request.get("run_seq")
+            if request_run_seq is not None:
+                if (
+                    isinstance(request_run_seq, bool)
+                    or not isinstance(request_run_seq, int)
+                    or request_run_seq < 0
+                ):
+                    raise ValueError("run_seq 必须是非负整数")
+                if request_run_seq != self.run_seq:
+                    return {
+                        "ok": False,
+                        "error": (
+                            "控制指令 run_seq 与当前任务不一致："
+                            f"request={request_run_seq}, current={self.run_seq}"
+                        ),
+                        "run_seq": self.run_seq,
+                        "simu_time": self.simu_time_curr,
+                    }
             for row in valid_yt_rows:
                 self._setpoints[str(row["name"])] = float(row["value"])
             for row in valid_yk_rows:
@@ -154,6 +193,8 @@ class SimulatorState:
         )
         return {
             "ok": True,
+            "run_seq": self.run_seq,
+            "simu_time": self.simu_time_curr,
             "accepted_yt": len(valid_yt_rows),
             "accepted_yk": len(valid_yk_rows),
         }

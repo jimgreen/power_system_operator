@@ -8,7 +8,7 @@
 
 > 2026-08-24 线程架构更新：默认运行形态改为一个 `operator_mmi` 宿主进程自动托管 Core、IO 两个工作线程；MMI 启动即按 Core → IO 启动，关闭时按 IO → Core 停止并等待，模拟器新任务或时钟回退恢复只停启受管 Core 线程。独立 Core/IO 入口仅保留给测试和兼容运维，不得与默认托管模式并行运行。
 
-> 2026-08-24 模拟器任务同步更新：YC/YX 成功响应可携带 `run_seq`、`simu_time_start`、`simu_status`、`runtime_ready`。EMS 以 `run_seq` 变化识别新的模拟任务，不再只依赖运行时刻回退；新任务首个有效断面就绪前必须保持 Core 暂停，完成运行数据清理和首断面同步后再恢复 Core。没有任务元数据的旧模拟器和 Mock 继续使用原时钟回退兼容逻辑。
+> 2026-08-24 模拟器任务同步更新：YC/YX 成功响应携带 `run_seq`、`simu_time_start`、`simu_status`、`runtime_ready`。EMS 以 `run_seq` 变化识别新的模拟任务，不再只依赖运行时刻回退；新任务首个有效断面就绪前必须保持 Core 暂停，完成运行数据清理和首断面同步后再恢复 Core。项目 Mock 同步实现任务元数据和旧任务命令拒绝；完全没有任务元数据的旧对端继续使用原时钟回退兼容逻辑。
 
 ---
 
@@ -933,7 +933,7 @@ operator_mmi/operator-io 子线程 --TCP client--> simulator_io
 }
 ```
 
-请求中的 `simu_time` 只是供旧 Mock 使用的建议值，默认为：
+请求中的 `simu_time` 是供项目 Mock 和不维护自身时钟的兼容对端使用的建议值，默认为：
 
 ```text
 当前 data_time_curr + data_period
@@ -981,7 +981,7 @@ operator_mmi/operator-io 子线程 --TCP client--> simulator_io
 
 - 成功的 YC/YX 响应顶层必须显式包含非负整数 `simu_time`。它是模拟器权威运行时刻，Bridge 不得在字段缺失时用请求建议值或本机墙钟代替。
 
-- 新版模拟器成功响应还必须成组携带任务元数据：非负整数 `run_seq`、非负整数 `simu_time_start`、取值为 0/1/2 的整数 `simu_status` 和布尔值 `runtime_ready`。只要出现 `run_seq`，其他三个字段就都必须存在且类型、范围正确，否则拒绝整批响应。`run_seq` 是权威任务身份；即使新任务时刻等于或大于本地旧时刻，只要任务序号变化也必须执行 9.2 的新任务恢复流程。为兼容尚未升级的开发 Mock 或旧对端，完全不含 `run_seq` 的响应继续使用已有时钟回退判断，不得伪造任务边界。
+- 新版模拟器和项目 Mock 的成功响应必须成组携带任务元数据：非负整数 `run_seq`、非负整数 `simu_time_start`、取值为 0/1/2 的整数 `simu_status` 和布尔值 `runtime_ready`。只要出现 `run_seq`，其他三个字段就都必须存在且类型、范围正确，否则拒绝整批响应。`run_seq` 是权威任务身份；即使新任务时刻等于或大于本地旧时刻，只要任务序号变化也必须执行 9.2 的新任务恢复流程。为兼容尚未升级的旧对端，完全不含 `run_seq` 的响应继续使用已有时钟回退判断，不得伪造任务边界。
 
 - 对带任务元数据的响应，只有 `runtime_ready=true` 且本包至少包含一个 `value != null`、`time > 0` 的 YC/YX 项时，才认为首个有效断面已经就绪。未就绪包可以同步任务序号、任务起始时刻和包级运行时刻，但不得把零时刻占位应用为业务量测，也不得启动 Core；首个有效断面到达并成功提交后才把 `source_runtime_ready=1` 并恢复 Core。
 
@@ -1040,13 +1040,14 @@ response.simu_time < operator_control.data_time_curr 且 run_seq 未变化
 
 #### 9.3 控制命令发送
 
-Bridge 每 1 秒检查一次 `scada_yt` 和 `scada_yk` 中 `time > max(0, 本进程发送游标)` 的命令。任何 `time <= 0` 的 YT/YK 都不得进入发送载荷。发送出口必须再次按点名过滤已经废弃的风机偏航角设定和桨距角设定 YT；即使旧点在进程运行期间被外部工具意外写回，也不得发送，并且必须按已检查候选点的最大 `time` 推进 YT 发送游标，避免每秒重复扫描同一废弃点。兼容 Server 返回 YT 时执行相同过滤。对 YK 必须在发送出口再次比较目标值与最新有效 YX/设备状态：只发送状态不一致的 YK；状态一致或当前状态未知的 YK 不得进入载荷。状态差异仍存在时，不比较旧 YK `value` 是否相同，每次控制决策都用本轮控制时刻刷新 YK `time`。兼容 Server 返回 YK 时执行同样复核。
+Bridge 每 1 秒检查一次 `scada_yt` 和 `scada_yk` 中 `time > max(0, 本进程发送游标)` 的命令。任何 `time <= 0` 的 YT/YK 都不得进入发送载荷。发送出口必须再次按点名过滤已经废弃的风机偏航角设定和桨距角设定 YT；即使旧点在进程运行期间被外部工具意外写回，也不得发送，并且必须按已检查候选点的最大 `time` 推进 YT 发送游标，避免每秒重复扫描同一废弃点。兼容 Server 返回 YT 时执行相同过滤。对 YK 必须在发送出口再次比较目标值与最新有效 YX/设备状态：只发送状态不一致的 YK；状态一致或当前状态未知的 YK 不得进入载荷。状态差异仍存在时，不比较旧 YK `value` 是否相同，每次控制决策都用本轮控制时刻刷新 YK `time`。兼容 Server 返回 YK 时执行同样复核。每个非空写请求顶层必须携带当前 `operator_control.source_run_seq`，使模拟器能拒绝来自旧任务的迟到控制命令。
 
 请求示例：
 
 ```json
 {
   "action": "write",
+  "run_seq": 7,
   "data": {
     "yt": [
       {
@@ -1068,7 +1069,7 @@ Bridge 每 1 秒检查一次 `scada_yt` 和 `scada_yk` 中 `time > max(0, 本进
 }
 ```
 
-只有收到 `{"ok": true}` 后才推进 YT/YK 游标。连接失败、超时或对端返回失败时必须保留游标，使命令可以再次发送，同时把对应 RTU 状态写为 0。
+只有响应是对象、明确包含 `{"ok": true}`，并且没有非空 `rejected` 字段时才推进 YT/YK 游标。连接失败、超时、非对象响应、`ok!=true` 或任何部分拒绝都必须抛错并保留游标，使命令可以整批再次发送，同时把对应 RTU 状态写为 0。
 
 系统停止、暂停、`io_connect_enabled=0` 或 Bridge 正常退出时，也要把对应 RTU 状态写为 0。Bridge 再次成功交换后恢复为 1。禁止仅因 `io_connect_enabled=1` 就把 RTU 状态写为 1。
 
@@ -1094,11 +1095,11 @@ Bridge 每 1 秒检查一次 `scada_yt` 和 `scada_yk` 中 `time > max(0, 本进
 
 - 默认监听 `127.0.0.1:9200`。
 
-- `action=read` 读取 `data.yc/data.yx` 点号数组并返回前述严格位置协议，把请求中的 `simu_time` 原样作为响应时刻。Mock 也必须逐项保持乱序和重复点，已定义点在 `time=0` 时仍返回自身值及零时刻，未知点返回 `{"value":null,"time":0}` 占位并输出 WARNING；返回项不得包含 `pnt_no/name`。
+- `action=read` 读取 `data.yc/data.yx` 点号数组并返回前述严格位置协议，把请求中的 `simu_time` 原样作为响应时刻；顶层同时返回可配置的非负 `run_seq`、`simu_time_start`、0/1/2 `simu_status` 和布尔 `runtime_ready`。Mock 必须逐项保持乱序和重复点，已定义点在 `time=0` 时仍返回自身值及零时刻，未知点返回 `{"value":null,"time":0}` 占位并输出 WARNING；返回项不得包含 `pnt_no/name`。
 
 - 风速和辐照可以基于时刻生成简单、可重复的变化。
 
-- `action=write` 从 `data.yt/data.yk` 接收控制点，记录日志，并返回接收数量。
+- `action=write` 从 `data.yt/data.yk` 接收控制点，校验顶层 `run_seq`。序号与当前 Mock 任务不一致时返回 `ok=false`、当前任务序号和当前运行时刻，且不得执行任何命令；一致时记录日志，并返回当前任务序号、运行时刻和接收数量。
 
 - Mock 只执行 `time > 0` 的 YT/YK；`time <= 0` 的控制项必须忽略，且不得计入 `accepted_yt` 或 `accepted_yk`。
 
@@ -1390,7 +1391,7 @@ README 必须说明：先启动 Mock，再只启动 MMI；MMI 自动按 Core →
 
 19. Bridge 按 `data_period` 获取数据。
 
-20. Bridge 每 1 秒只发送 `time > 0` 且时标晚于发送游标的命令；YT/YK 是否刷新时标均不以旧 `value` 是否相同为条件。YK 还必须通过最新 YX/设备状态差异复核，状态一致、状态未知或负游标命中的 `time=0` 命令都不能放出。
+20. Bridge 每 1 秒只发送 `time > 0` 且时标晚于发送游标的命令；非空写请求顶层携带当前 `source_run_seq`。YT/YK 是否刷新时标均不以旧 `value` 是否相同为条件。YK 还必须通过最新 YX/设备状态差异复核，状态一致、状态未知或负游标命中的 `time=0` 命令都不能放出。对端返回非对象、`ok!=true` 或非空 `rejected` 时不得推进 YT/YK 游标。
 
 21. 读取或命令发送失败时不推进相应进度，并将 RTU 状态写为 0；恢复成功后写回 1。
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 import threading
 
+import pytest
+
 from power_operator.io_service import SimulatorIoClient
 from simulator_io_mock import SimulatorState, ThreadingSimulatorServer
 
@@ -28,6 +30,17 @@ def test_mock_server_supports_positional_read_and_applies_written_setpoints(capl
                 }
             )
         assert first["simu_time"] == 3
+        assert {
+            "run_seq": first["run_seq"],
+            "simu_status": first["simu_status"],
+            "simu_time_start": first["simu_time_start"],
+            "runtime_ready": first["runtime_ready"],
+        } == {
+            "run_seq": 1,
+            "simu_status": 1,
+            "simu_time_start": 0,
+            "runtime_ready": True,
+        }
         assert all(set(row) == {"value", "time"} for row in first["data"]["yc"])
         assert all(set(row) == {"value", "time"} for row in first["data"]["yx"])
         assert [row["time"] for row in first["data"]["yc"]] == [3, 3, 0, 3, 3, 3]
@@ -65,6 +78,7 @@ def test_mock_server_supports_positional_read_and_applies_written_setpoints(capl
         reply = client.exchange(
             {
                 "action": "write",
+                "run_seq": first["run_seq"],
                 "data": {
                     "yt": [
                         {
@@ -91,7 +105,22 @@ def test_mock_server_supports_positional_read_and_applies_written_setpoints(capl
                 },
             }
         )
-        assert reply == {"ok": True, "accepted_yt": 1, "accepted_yk": 0}
+        assert reply == {
+            "ok": True,
+            "run_seq": 1,
+            "simu_time": 0,
+            "accepted_yt": 1,
+            "accepted_yk": 0,
+        }
+
+        with pytest.raises(RuntimeError, match="request=0, current=1"):
+            client.exchange(
+                {
+                    "action": "write",
+                    "run_seq": 0,
+                    "data": {"yt": [], "yk": []},
+                }
+            )
 
         second = client.exchange(
             {

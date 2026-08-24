@@ -724,6 +724,8 @@ class OperatorIoBridge:
 
     def _push_changed_commands(self, _current_time: int) -> None:
         with self.database.session() as session:
+            control = session.get(OperatorControl, 1)
+            source_run_seq = int(control.source_run_seq) if control is not None else 0
             valid_after_yt = max(0, self._last_yt_time)
             valid_after_yk = max(0, self._last_yk_time)
             yt_candidates = session.scalars(
@@ -754,15 +756,23 @@ class OperatorIoBridge:
             self._last_yt_time = latest_checked_yt_time
             self._last_yk_time = latest_checked_yk_time
             return
-        self.transport(
+        response = self.transport(
             {
                 "action": "write",
+                "run_seq": source_run_seq,
                 "data": {
                     "yt": [self._point_payload(row) for row in yt_rows],
                     "yk": [self._point_payload(row) for row in yk_rows],
                 },
             }
         )
+        if not isinstance(response, dict) or response.get("ok") is not True:
+            raise ValueError(
+                str(response.get("error") if isinstance(response, dict) else "")
+                or "simulator_io 拒绝批量写入 YT/YK"
+            )
+        if response.get("rejected"):
+            raise ValueError(f"simulator_io 拒绝部分 YT/YK：{response['rejected']}")
         self._last_yt_time = latest_checked_yt_time
         self._last_yk_time = latest_checked_yk_time
 

@@ -866,6 +866,7 @@ python -m py_compile operator_mmi_qt.py operator_mmi.py</code></pre>
             <h3>YT/YK 写请求</h3>
             <pre><code>{
   "action": "write",
+  "run_seq": 7,
   "data": {
     "yt": [
       {"pnt_no": 200001, "name": "dev_wind_gen.1.p_set", "value": 62.5, "time": 10}
@@ -877,10 +878,11 @@ python -m py_compile operator_mmi_qt.py operator_mmi.py</code></pre>
 }</code></pre>
             <ul>
               <li>YT/YK 写报文仍携带点号；对端只允许更新预定义点。</li>
+              <li>非空写请求顶层携带当前 <code>source_run_seq</code>，用于拒绝旧任务迟到命令。</li>
               <li>只有 <code>time &gt; 0</code> 的命令可发送和执行。</li>
               <li>每次闭环决策都刷新 YT 时标，不以数值是否变化为条件。</li>
               <li>YK 只有在目标状态与实时状态不一致时才生成/发送；状态差异持续时，每个决策周期刷新 YK 时标。</li>
-              <li>只有收到 <code>{"ok":true}</code> 后 IO 才推进发送游标；失败时保留命令供下次重试。</li>
+              <li>只有响应为对象、明确 <code>{"ok":true}</code> 且没有非空 <code>rejected</code> 时 IO 才推进发送游标；失败或部分拒绝时保留整批命令供下次重试。</li>
             </ul>
 
             <h3>模拟器新任务与时钟回退</h3>
@@ -1192,7 +1194,7 @@ p_max = calculate_wind_max_power(
             <pre><code>$env:QT_QPA_PLATFORM = 'offscreen'
 python -m pytest -q
 python -m compileall -q .</code></pre>
-            <p>软件基线提交验证结果：<strong>103 passed</strong>。测试范围包括数据库结构/迁移、定义导入、并发写、策略边界、新任务与时钟回退、四遥协议、未知点告警、决策审计、MMI 自动托管线程、编辑保护、曲线游标和三位小数显示。</p>
+            <p>软件基线提交验证结果：<strong>105 passed</strong>。测试范围包括数据库结构/迁移、定义导入、并发写、策略边界、新任务与时钟回退、旧任务控制拒绝、四遥协议、未知点告警、决策审计、MMI 自动托管线程、编辑保护、曲线游标和三位小数显示。</p>
 
             <h3>版本信息</h3>
             <div class="table-wrap">
