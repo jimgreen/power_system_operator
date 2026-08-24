@@ -1,0 +1,191 @@
+1. 在sqlite创建数据库 power.db（数据库IO接口，使用 SQLAlchemy）：
+
+
+scada_rtu:
+	id(int, RTU序号)
+	ip(string，IP地址)
+	port(int， IP端口)
+	status(int， 运行状态)
+	refresh_time(int， 数据刷新时间)
+
+scada_yc:
+	pnt_no(int)
+	name(string)
+	value(float)
+	time(int)
+
+scada_yx:
+	pnt_no(int)
+	name(string)
+	value(int)
+	time(int)
+
+scada_yk:
+	pnt_no(int)
+	name(string)
+	value(int)
+	time(int)
+
+scada_yt:
+	pnt_no(int)
+	name(string)
+	value(float)
+	time(int)
+
+
+dev_diesal_gen:
+	id(int，柴发id，全网唯一)
+	name(string，风机名称)
+	p_rated(float，额定功率)
+	p_max(float，有功上限)
+	p_min(float，有功上限)
+	p_coeff(float，柴油消耗率, kg/kWh)
+	status(int, 运行状态， 1：运行，0：停止）
+	p_curr(float, 当前出力)
+
+dev_wind_gen:
+	id(int，风机id，全网唯一)
+	name(string，风机名称)
+	p_rated(float，额定功率)
+	wind_in(float，切入风速)
+	wind_rated(float，额定风速)
+	wind_cut(float，切出风速)
+	status(int, 运行状态， 1：运行，0：停止）
+	p_max_curr(float，理论最大出力实时值)
+	angle_pitch_curr(float，当前桨距角)
+	p_curr(float，当前出力)
+
+
+dev_solar_gen:
+	id(int，光伏id，全网唯一)
+	name(string，光伏名称)
+	p_rated(float，额定功率)
+	status(int, 运行状态， 1：运行，0：停止）
+	p_max_curr(float，理论最大出力实时值)
+	p_curr(float，当前出力实时值)
+
+
+dev_estore:
+	id(int，负荷id，全网唯一)
+	name(string，负荷名称)
+	status(int, 运行状态， 1：运行，0：停止）
+	p_charge_max(充电功率上限）
+	p_charge_eff(充电效率）
+	p_discharge_max(放电功率上限）
+	p_discharge_eff(放电效率）
+	p_curr(float，当前发电值)
+	battery capacity(float，电池电量, kWh)
+	soc_curr(当前soc）
+	soc_max(soc上限）
+	soc_min(soc上限）
+
+
+dev_load:
+	id(int，负荷id，全网唯一)
+	name(string，负荷名称)
+	status(int, 运行状态， 1：运行，0：停止）
+	p_curr(float，当前负荷值)
+
+curve_def:
+	dev_type(string，设备类型)
+	dev_name(string，设备名称)
+	curve_type(string，曲线类型)
+	t1、t2、.....、t1440(float, 1分钟间隔的数据值，共计1440点）
+
+env_info:
+	time(int， 时间)
+	wind_curr(float， 当前风速)
+	solar_curr(float， 当前太阳辐照)
+
+
+simulator_control：
+	simu_status(int, 当前状态： 运行、停止、暂停)
+	simu_period(int，仿真周期， 秒， 多长时间启动一次仿真运行)
+	simu_step(int，仿真步长、一次向前走多远)
+	simu_time_start(int，仿真开始时刻)
+	simu_time_end(int，仿真结束时刻)
+	simu_time_curr(int，当前仿真时刻)
+
+
+simulator_log:
+	log_time(int，日志时刻)
+	simu_time(int，仿真时刻)
+	log_type(int, 日志类型）
+	log_info(string, 日志详情）
+
+
+simulator_history:
+	simu_time(int，仿真时刻)
+	wind_speed(float，当前风速)
+	solar_radiation(float，当前太阳辐照)
+	amb_temp(float，当前环境温度)
+	diesal_power_curr_sum(float, 柴油总出力, kW）
+	diesal_power_set_sum(float, 柴油总出力, kW）
+	diesal_curr_sum(float, 柴油总消耗,kg）
+	wind_power_curr_sum(float, 风机总出力,kW）
+	wind_power_max_sum(float, 风机理论总出力,kW）
+	wind_power_set_sum(float, 风机理论总出力,kW）
+	solar_power_curr_sum(float, 光伏总出力,kW）
+	solar_power_max_sum(float, 光伏理论总出力,kW）
+	solar_power_set_sum(float, 光伏理论总出力,kW）
+	load_power_curr_sum(float, 负荷总用电功率,kW）
+	estore_power_curr_sum(float, 储能总出力,kW）
+	estore_power_set_sum(float, 储能总出力设定,kW）
+	estore_power_soc_sum(float, 储能总SOC）
+
+
+scada_yc_his:
+	simu_time(int，仿真时刻)
+	pnt_no(int)
+	value(float)
+
+scada_yt_his:
+	simu_time(int，仿真时刻)
+	pnt_no(int)
+	value(float)
+
+scada_yx_his:
+	simu_time(int，仿真时刻)
+	pnt_no(int)
+	value(int)
+
+scada_yk_his:
+	simu_time(int，仿真时刻)
+	pnt_no(int)
+	value(int)
+
+simulator_evaluation:
+
+	自动添加2台柴发(100kW、300kW)、2台风机(50kW、100kW)、2台光伏(100kW、150kW)，2个负荷（100kW、200kW），2台储能（100kW/100kWh、200kW/200kWh） 自动生成4遥点表、自成生成curve_def、simulator_control，自动添加环境数据（风、光、温）的遥测点, 自动添加各风机桨距角的遥测点
+
+2. 编写 仿真内核程序： simulator_core（常驻内存进程，数据库IO接口，使用 SQLAlchemy）：
+	1. 以0.5秒为周期，读取 数据库 simulator_control 表。
+	2. 仿真状态判断：当系统状态由 停止 转 投入运行， 则清空历史曲线、历史日志等历史信息，若simulator_control.simu_time_curr >= simulator_control.time_end,则返回1，继续等待新的仿真任务，若simulator_control.simu_status != 1(运行），则返回1，继续等待，否则继续后续运行，若 当前时刻 - 上一次时刻 < simulator_control.simu_period，则说明未达到仿真周期，返回1，继续等待，否则继续运行。
+	3. 更新仿真状态：保存当前时刻 为上一次时刻，根据仿真步长累加计算本次仿真时刻为simulator_control.simu_time_curr，依据simulator_control.simu_time_curr，读取曲线表、设备表，根据本次仿真时刻，得到当前的风速、太阳辐射、各负荷功率的实时值，并根据上一时刻的储能功率值，更新储能soc。
+	4. 实时功率计算：根据当前风速、风机变桨等实时值、风机启停状态、以及风机参数，计算各风机的实时出力值、理论最大出力值，根据当前太阳辐照值、各光伏功率设定值、各光伏启停状态以及光伏参数，计算各光伏的实时出力值、理论最大出力值，读取遥调表，得到各柴油发电机的出力设定值、各储能的功率设定值，根据各负荷功率实时值、各风机实时出力、各光伏出力、各柴发出力设定值、各储能功率设定值，实时修正各柴发出力值（按容量分配），以保障电网功率平衡。
+	5. 计算结果回写：相关计算结果保存到scada_yc, scada_yx 等 遥测/遥信表，以及各设备表（刷新curr 值）
+	6. 历史信息记录：运行日志保存到simulator_log，仿真过程记录simulator_history， scada_yc/scada_yx/scada_yk/scada_yt等切面，保存到相应的历史数据库。
+	7. 仿真效果评价：当simulator_control.simu_time_curr >= simulator_control.simu_time_end，则切换系统状态为停止，则对仿真效果进行评价（EMS效果：绿电少发（柴发有下调空间，但风机和光伏偏离理论最大值，得到绿电少电量） + 安全事件（柴发功率越上限,越下限次数、储能soc越上限、越下限次数）、风机控制器效果：功率跟踪（设定值 与实时值的RMSE）及设备切入/切出逻辑符合（不符合次数）情况）
+
+3. 编写 交互服务程序：	simulator_io（常驻内存进程，数据库IO接口，使用 SQLAlchemy）：
+	启动简易TCP服务，客户端可以 实时 批量获得 yc 和 yx 信息（客户指定 yc 点号列表、yx点号列表）， 也可以批量实时更新 yt 和 yk 值（客户指定 yt 点号列表与值、yk点号列表与值）。
+
+4. 编写 QT人机程序：	simulator_mmi（常驻内存进程）， 使用pyqt6作为界面引擎，数据库IO接口使用 SQLAlchemy：
+	整体页面为上下结构，上面可以展示simulator_control相关信息（支持启动、停止、暂停等人机操作控制，这个高度不需要太高，尽量小、但也不要层叠）：
+	1. 仿真起始和结束时刻，按照 时-分-秒来组织，忽略日期，
+	2. 仿真步长，变成下拉菜单： 1秒、5秒、10秒、15秒、30秒、60秒，
+	3. 运行周期，变成下拉菜单： 1秒、2秒、3秒、4秒、5秒、10秒，
+	4. 当前仿真时刻，也是只有时-分-秒  ，没有年月日。
+
+	下面是多页widget（高度自适应，尽量高）：
+	1. 系统主页，展示simulator_history中的曲线， 以文本框的方式，展示当前仿真时刻对应的各项值。
+	2. 曲线定义， 展示并修改curve_def，左右结构，左边是曲线树型列表，右边是曲线板（支持通过鼠标拖拽来修改曲线）
+	3. 设备定义： 展示并修改dev_diesal_gen、dev_wind_gen、dev_solar_gen、dev_load
+	4. 四遥定义： 展示scada_yc/scada_yx/scada_yt/scada_yk
+	5. 运行日志： 展示simulator_log
+	6. 历史曲线： 查询展示scada_yc_his、scada_yt_his、scada_yx_his、scada_yk_his (左右结构，左边是4遥树型列表，右边是曲线板。 支持选择多个4遥点，以显示多条曲线。)
+
+
+5. sqlite3，要考虑多进程同时访问同一张表，如何避免因访问冲突而失败，比如进程锁？
+
+6. simulator_mmi，先生成simulator_mmi_qt.ui，再调用uic去生成相关qt代码，供simulator_mmi来调用。

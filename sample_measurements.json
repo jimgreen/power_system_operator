@@ -1,0 +1,10 @@
+{
+  "yc": [
+    {"pnt_no": 1, "name": "simu.wind", "value": 8.5},
+    {"pnt_no": 2, "name": "simu.solar", "value": 750.0},
+    {"pnt_no": 1001, "name": "dev_load.1.p_curr", "value": 120.0}
+  ],
+  "yx": [
+    {"pnt_no": 2001, "name": "dev_load.1.status", "value": 1}
+  ]
+}

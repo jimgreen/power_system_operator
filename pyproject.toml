@@ -1,0 +1,17 @@
+[project]
+name = "power-system-operator"
+version = "0.1.0"
+description = "SQLite/SQLAlchemy based power-system operator system"
+requires-python = ">=3.11"
+dependencies = [
+    "SQLAlchemy>=2.0,<3",
+    "PyQt6>=6.5,<7",
+    "psutil>=5.9,<8",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<9"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

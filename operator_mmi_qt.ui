@@ -1,0 +1,306 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>OperatorMainWindow</class>
+ <widget class="QMainWindow" name="OperatorMainWindow">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>1480</width><height>920</height></rect>
+  </property>
+  <property name="minimumSize"><size><width>1050</width><height>680</height></size></property>
+  <property name="windowTitle"><string>电力系统操作员人机界面</string></property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QVBoxLayout" name="rootLayout" stretch="0,1">
+    <property name="spacing"><number>6</number></property>
+    <property name="leftMargin"><number>8</number></property>
+    <property name="topMargin"><number>8</number></property>
+    <property name="rightMargin"><number>8</number></property>
+    <property name="bottomMargin"><number>8</number></property>
+    <item>
+     <widget class="QGroupBox" name="controlGroup">
+      <property name="sizePolicy"><sizepolicy hsizetype="Expanding" vsizetype="Maximum"><horstretch>0</horstretch><verstretch>0</verstretch></sizepolicy></property>
+      <property name="title"><string>运行控制</string></property>
+      <layout class="QHBoxLayout" name="controlLayout">
+       <item>
+        <layout class="QGridLayout" name="controlGrid">
+         <property name="horizontalSpacing"><number>10</number></property><property name="verticalSpacing"><number>7</number></property>
+         <item row="0" column="0"><widget class="QLabel" name="labelOperStatus"><property name="text"><string>运行状态</string></property></widget></item>
+         <item row="0" column="1">
+          <widget class="QComboBox" name="operStatusCombo">
+           <property name="minimumSize"><size><width>110</width><height>0</height></size></property>
+           <item><property name="text"><string>停止</string></property></item><item><property name="text"><string>运行</string></property></item><item><property name="text"><string>暂停</string></property></item>
+          </widget>
+         </item>
+         <item row="0" column="2"><widget class="QLabel" name="labelControlMode"><property name="text"><string>控制模式</string></property></widget></item>
+         <item row="0" column="3">
+          <widget class="QComboBox" name="controlModeCombo">
+           <property name="minimumSize"><size><width>100</width><height>0</height></size></property>
+           <item><property name="text"><string>开环</string></property></item><item><property name="text"><string>闭环</string></property></item>
+          </widget>
+         </item>
+         <item row="0" column="4"><widget class="QLabel" name="labelDataTime"><property name="text"><string>数据时刻</string></property></widget></item>
+         <item row="0" column="5"><widget class="QLabel" name="dataTimeValue"><property name="minimumSize"><size><width>105</width><height>0</height></size></property><property name="text"><string>00:00:00</string></property></widget></item>
+         <item row="0" column="6"><widget class="QLabel" name="labelOperTime"><property name="text"><string>控制时刻</string></property></widget></item>
+         <item row="0" column="7"><widget class="QLabel" name="operTimeValue"><property name="minimumSize"><size><width>105</width><height>0</height></size></property><property name="text"><string>00:00:00</string></property></widget></item>
+         <item row="1" column="0"><widget class="QLabel" name="labelDataPeriod"><property name="text"><string>数据周期（秒）</string></property></widget></item>
+         <item row="1" column="1"><widget class="QSpinBox" name="dataPeriodSpin"><property name="minimum"><number>1</number></property><property name="maximum"><number>86400</number></property><property name="value"><number>1</number></property></widget></item>
+         <item row="1" column="2"><widget class="QLabel" name="labelOperPeriod"><property name="text"><string>决策周期（墙钟秒）</string></property></widget></item>
+         <item row="1" column="3"><widget class="QSpinBox" name="operPeriodSpin"><property name="minimum"><number>1</number></property><property name="maximum"><number>86400</number></property><property name="value"><number>1</number></property></widget></item>
+         <item row="1" column="4" colspan="4"><widget class="QLabel" name="controlHintLabel"><property name="text"><string>内核每 0.5 秒检查运行状态；决策按墙钟周期执行；闭环回写遥调与遥控</string></property></widget></item>
+       </layout>
+      </item>
+       <item><spacer name="controlSpacerLeft"><property name="orientation"><enum>Qt::Orientation::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>30</width><height>20</height></size></property></spacer></item>
+       <item>
+        <layout class="QGridLayout" name="controlButtonLayout">
+         <property name="horizontalSpacing"><number>8</number></property><property name="verticalSpacing"><number>7</number></property>
+         <item row="0" column="0"><widget class="QPushButton" name="saveControlButton"><property name="text"><string>保存参数</string></property></widget></item>
+         <item row="0" column="1"><widget class="QPushButton" name="startButton"><property name="text"><string>启动 / 继续</string></property></widget></item>
+         <item row="1" column="0"><widget class="QPushButton" name="pauseButton"><property name="text"><string>暂停</string></property></widget></item>
+         <item row="1" column="1"><widget class="QPushButton" name="stopButton"><property name="text"><string>停止</string></property></widget></item>
+        </layout>
+       </item>
+       <item><spacer name="controlSpacerRight"><property name="orientation"><enum>Qt::Orientation::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>18</width><height>20</height></size></property></spacer></item>
+       <item>
+        <widget class="QFrame" name="simulatorConnectionFrame">
+         <property name="sizePolicy"><sizepolicy hsizetype="Preferred" vsizetype="Fixed"><horstretch>0</horstretch><verstretch>0</verstretch></sizepolicy></property>
+         <property name="minimumSize"><size><width>210</width><height>44</height></size></property>
+         <property name="maximumSize"><size><width>280</width><height>48</height></size></property>
+         <property name="frameShape"><enum>QFrame::Shape::StyledPanel</enum></property>
+         <layout class="QHBoxLayout" name="simulatorConnectionLayout">
+          <property name="leftMargin"><number>10</number></property><property name="topMargin"><number>6</number></property><property name="rightMargin"><number>10</number></property><property name="bottomMargin"><number>6</number></property><property name="spacing"><number>10</number></property>
+          <item><widget class="QLabel" name="simulatorConnectionCaptionLabel"><property name="text"><string>电网模拟器连接</string></property></widget></item>
+          <item><widget class="QLabel" name="simulatorConnectionStatusValue"><property name="minimumSize"><size><width>68</width><height>26</height></size></property><property name="alignment"><set>Qt::AlignmentFlag::AlignCenter</set></property><property name="text"><string>中断</string></property></widget></item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="simulatorConnectionButtonLayout">
+         <property name="spacing"><number>6</number></property>
+         <item><widget class="QPushButton" name="connectSimulatorButton"><property name="minimumSize"><size><width>82</width><height>0</height></size></property><property name="text"><string>建立连接</string></property></widget></item>
+         <item><widget class="QPushButton" name="disconnectSimulatorButton"><property name="minimumSize"><size><width>82</width><height>0</height></size></property><property name="text"><string>中断连接</string></property></widget></item>
+        </layout>
+       </item>
+      </layout>
+     </widget>
+    </item>
+    <item>
+     <widget class="QTabWidget" name="mainTabs">
+      <property name="currentIndex"><number>0</number></property>
+      <widget class="QWidget" name="homePage">
+       <attribute name="title"><string>系统主页</string></attribute>
+       <layout class="QVBoxLayout" name="homeLayout" stretch="0,1">
+        <item>
+          <widget class="QGroupBox" name="currentValuesGroup">
+           <property name="sizePolicy"><sizepolicy hsizetype="Expanding" vsizetype="Fixed"><horstretch>0</horstretch><verstretch>0</verstretch></sizepolicy></property>
+           <property name="minimumSize"><size><width>0</width><height>172</height></size></property><property name="maximumSize"><size><width>16777215</width><height>192</height></size></property>
+           <property name="title"><string>当前运行断面</string></property>
+           <layout class="QGridLayout" name="currentValuesGrid">
+            <property name="horizontalSpacing"><number>8</number></property>
+            <property name="verticalSpacing"><number>7</number></property>
+            <property name="leftMargin"><number>8</number></property>
+            <property name="topMargin"><number>10</number></property>
+            <property name="rightMargin"><number>8</number></property>
+            <property name="bottomMargin"><number>8</number></property>
+           </layout>
+         </widget>
+        </item>
+        <item>
+         <widget class="QSplitter" name="homeCurveSplitter">
+          <property name="orientation"><enum>Qt::Orientation::Horizontal</enum></property><property name="childrenCollapsible"><bool>false</bool></property>
+           <widget class="QWidget" name="homeCurveListPanel">
+            <property name="minimumSize"><size><width>300</width><height>0</height></size></property><property name="maximumSize"><size><width>420</width><height>16777215</height></size></property>
+            <layout class="QVBoxLayout" name="homeCurveListLayout">
+             <item><widget class="QLabel" name="homeCurveListTitleLabel"><property name="text"><string>待显示曲线（可多选）</string></property></widget></item>
+             <item><widget class="QTreeWidget" name="homeCurveTree"><property name="alternatingRowColors"><bool>true</bool></property><property name="headerHidden"><bool>true</bool></property><property name="rootIsDecorated"><bool>true</bool></property><property name="uniformRowHeights"><bool>true</bool></property><column><property name="text"><string>曲线</string></property></column></widget></item>
+            <item><layout class="QHBoxLayout" name="homeCurveListButtonLayout"><item><widget class="QPushButton" name="homeCurveSelectAllButton"><property name="text"><string>全选</string></property></widget></item><item><widget class="QPushButton" name="homeCurveClearButton"><property name="text"><string>清空</string></property></widget></item></layout></item>
+           </layout>
+          </widget>
+          <widget class="QWidget" name="homeCurvePlotPanel">
+           <layout class="QVBoxLayout" name="homeCurvePlotPanelLayout" stretch="0,1">
+            <item><widget class="QLabel" name="homeCurveStatusLabel"><property name="text"><string>请选择左侧待显示曲线</string></property></widget></item>
+            <item><widget class="QFrame" name="homePlotFrame"><property name="minimumSize"><size><width>0</width><height>320</height></size></property><property name="frameShape"><enum>QFrame::Shape::StyledPanel</enum></property></widget></item>
+           </layout>
+          </widget>
+         </widget>
+        </item>
+       </layout>
+      </widget>
+      <widget class="QWidget" name="devicePage">
+       <attribute name="title"><string>设备定义</string></attribute>
+       <layout class="QVBoxLayout" name="deviceLayout">
+        <item>
+         <widget class="QFrame" name="deviceEditFrame">
+          <property name="frameShape"><enum>QFrame::Shape::StyledPanel</enum></property>
+          <layout class="QHBoxLayout" name="deviceEditLayout">
+           <property name="leftMargin"><number>10</number></property>
+           <property name="topMargin"><number>6</number></property>
+           <property name="rightMargin"><number>10</number></property>
+           <property name="bottomMargin"><number>6</number></property>
+           <item>
+            <widget class="QLabel" name="deviceEditHintLabel">
+             <property name="sizePolicy"><sizepolicy hsizetype="Expanding" vsizetype="Preferred"><horstretch>1</horstretch><verstretch>0</verstretch></sizepolicy></property>
+             <property name="text"><string>双击浅黄色单元格修改设备静态参数；灰色实时字段只读。设备名称改动后，请同步维护系统预定义四遥点名。</string></property>
+             <property name="wordWrap"><bool>true</bool></property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QPushButton" name="saveDevicesButton">
+             <property name="minimumSize"><size><width>128</width><height>0</height></size></property>
+             <property name="enabled"><bool>false</bool></property>
+             <property name="text"><string>保存设备修改</string></property>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </item>
+        <item>
+         <widget class="QTabWidget" name="deviceTabs">
+          <widget class="QWidget" name="diesalPage"><attribute name="title"><string>柴油发电机</string></attribute><layout class="QVBoxLayout" name="diesalLayout"><item><widget class="QTableWidget" name="diesalTable"><property name="alternatingRowColors"><bool>true</bool></property></widget></item></layout></widget>
+          <widget class="QWidget" name="windPage"><attribute name="title"><string>风力发电机</string></attribute><layout class="QVBoxLayout" name="windLayout"><item><widget class="QTableWidget" name="windTable"><property name="alternatingRowColors"><bool>true</bool></property></widget></item></layout></widget>
+          <widget class="QWidget" name="solarPage"><attribute name="title"><string>光伏发电机</string></attribute><layout class="QVBoxLayout" name="solarLayout"><item><widget class="QTableWidget" name="solarTable"><property name="alternatingRowColors"><bool>true</bool></property></widget></item></layout></widget>
+          <widget class="QWidget" name="estorePage"><attribute name="title"><string>储能</string></attribute><layout class="QVBoxLayout" name="estoreLayout"><item><widget class="QTableWidget" name="estoreTable"><property name="alternatingRowColors"><bool>true</bool></property></widget></item></layout></widget>
+          <widget class="QWidget" name="loadPage"><attribute name="title"><string>负荷</string></attribute><layout class="QVBoxLayout" name="loadLayout"><item><widget class="QTableWidget" name="loadTable"><property name="alternatingRowColors"><bool>true</bool></property></widget></item></layout></widget>
+         </widget>
+        </item>
+       </layout>
+      </widget>
+      <widget class="QWidget" name="scadaPage">
+       <attribute name="title"><string>RTU / 四遥定义</string></attribute>
+       <layout class="QVBoxLayout" name="scadaLayout">
+        <item>
+         <widget class="QGroupBox" name="ioConnectionGroup">
+          <property name="sizePolicy"><sizepolicy hsizetype="Expanding" vsizetype="Maximum"><horstretch>0</horstretch><verstretch>0</verstretch></sizepolicy></property>
+          <property name="title"><string>operator_io 连接状态</string></property>
+          <layout class="QHBoxLayout" name="ioConnectionLayout">
+           <item><widget class="QLabel" name="ioConnectionCaptionLabel"><property name="text"><string>当前状态</string></property></widget></item>
+           <item><widget class="QLabel" name="ioConnectionStatusValue"><property name="minimumSize"><size><width>100</width><height>0</height></size></property><property name="alignment"><set>Qt::AlignmentFlag::AlignCenter</set></property><property name="text"><string>连接中断</string></property></widget></item>
+           <item><widget class="QLabel" name="ioConnectionDetailLabel"><property name="text"><string>尚无 RTU 连接记录</string></property></widget></item>
+           <item><spacer name="ioConnectionSpacer"><property name="orientation"><enum>Qt::Orientation::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+          </layout>
+         </widget>
+        </item>
+        <item>
+         <widget class="QTabWidget" name="scadaTabs">
+          <widget class="QWidget" name="rtuPage"><attribute name="title"><string>RTU</string></attribute><layout class="QVBoxLayout" name="rtuLayout"><item><widget class="QTableWidget" name="rtuTable"><property name="alternatingRowColors"><bool>true</bool></property></widget></item></layout></widget>
+          <widget class="QWidget" name="ycPage"><attribute name="title"><string>遥测 YC</string></attribute><layout class="QVBoxLayout" name="ycLayout"><item><widget class="QTableWidget" name="ycTable"><property name="alternatingRowColors"><bool>true</bool></property></widget></item></layout></widget>
+          <widget class="QWidget" name="yxPage"><attribute name="title"><string>遥信 YX</string></attribute><layout class="QVBoxLayout" name="yxLayout"><item><widget class="QTableWidget" name="yxTable"><property name="alternatingRowColors"><bool>true</bool></property></widget></item></layout></widget>
+          <widget class="QWidget" name="ytPage"><attribute name="title"><string>遥调 YT</string></attribute><layout class="QVBoxLayout" name="ytLayout"><item><widget class="QTableWidget" name="ytTable"><property name="alternatingRowColors"><bool>true</bool></property></widget></item></layout></widget>
+          <widget class="QWidget" name="ykPage"><attribute name="title"><string>遥控 YK</string></attribute><layout class="QVBoxLayout" name="ykLayout"><item><widget class="QTableWidget" name="ykTable"><property name="alternatingRowColors"><bool>true</bool></property></widget></item></layout></widget>
+         </widget>
+        </item>
+        <item><widget class="QPushButton" name="saveScadaButton"><property name="text"><string>保存 RTU / 四遥修改</string></property></widget></item>
+       </layout>
+      </widget>
+      <widget class="QWidget" name="logPage">
+       <attribute name="title"><string>运行日志</string></attribute>
+       <layout class="QVBoxLayout" name="logLayout">
+        <item>
+         <layout class="QHBoxLayout" name="logFilterLayout">
+          <property name="spacing"><number>8</number></property>
+          <item><widget class="QLabel" name="logTypeLabel"><property name="text"><string>日志类型</string></property></widget></item>
+          <item>
+           <widget class="QComboBox" name="logTypeCombo">
+            <property name="maximumSize"><size><width>120</width><height>16777215</height></size></property>
+            <item><property name="text"><string>全部</string></property></item>
+            <item><property name="text"><string>信息</string></property></item>
+            <item><property name="text"><string>警告</string></property></item>
+            <item><property name="text"><string>错误</string></property></item>
+            <item><property name="text"><string>控制决策</string></property></item>
+           </widget>
+          </item>
+          <item><widget class="QLabel" name="logStartLabel"><property name="text"><string>运行开始时刻</string></property></widget></item>
+          <item><widget class="QLineEdit" name="logStartEdit"><property name="maximumSize"><size><width>110</width><height>16777215</height></size></property><property name="placeholderText"><string>HH:mm:ss</string></property></widget></item>
+          <item><widget class="QLabel" name="logEndLabel"><property name="text"><string>运行结束时刻</string></property></widget></item>
+          <item><widget class="QLineEdit" name="logEndEdit"><property name="maximumSize"><size><width>110</width><height>16777215</height></size></property><property name="placeholderText"><string>HH:mm:ss</string></property></widget></item>
+          <item><widget class="QLabel" name="logKeywordLabel"><property name="text"><string>关键词</string></property></widget></item>
+          <item><widget class="QLineEdit" name="logKeywordEdit"><property name="placeholderText"><string>决策 ID、设备、点名、步骤或告警</string></property></widget></item>
+          <item><widget class="QPushButton" name="logQueryButton"><property name="text"><string>查询</string></property></widget></item>
+          <item><widget class="QPushButton" name="logResetButton"><property name="text"><string>重置</string></property></widget></item>
+         </layout>
+        </item>
+        <item>
+         <widget class="QSplitter" name="logSplitter">
+          <property name="orientation"><enum>Qt::Orientation::Horizontal</enum></property>
+          <property name="childrenCollapsible"><bool>false</bool></property>
+          <widget class="QWidget" name="logListPanel">
+           <property name="minimumSize"><size><width>620</width><height>0</height></size></property>
+           <layout class="QVBoxLayout" name="logListLayout">
+            <property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property><property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property>
+            <item>
+             <widget class="QTableWidget" name="logTable">
+              <property name="editTriggers"><set>QAbstractItemView::EditTrigger::NoEditTriggers</set></property>
+              <property name="alternatingRowColors"><bool>true</bool></property>
+              <property name="selectionBehavior"><enum>QAbstractItemView::SelectionBehavior::SelectRows</enum></property>
+              <property name="selectionMode"><enum>QAbstractItemView::SelectionMode::SingleSelection</enum></property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+          <widget class="QWidget" name="logDetailPanel">
+           <property name="minimumSize"><size><width>420</width><height>0</height></size></property>
+           <layout class="QVBoxLayout" name="logDetailLayout">
+            <property name="leftMargin"><number>6</number></property><property name="topMargin"><number>0</number></property><property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property>
+            <item><widget class="QLabel" name="logDetailTitleLabel"><property name="text"><string>日志详情</string></property></widget></item>
+            <item>
+             <widget class="QTabWidget" name="logDetailTabs">
+              <widget class="QWidget" name="logFormattedPage">
+               <attribute name="title"><string>格式化详情</string></attribute>
+               <layout class="QVBoxLayout" name="logFormattedLayout">
+                <property name="leftMargin"><number>0</number></property><property name="topMargin"><number>6</number></property><property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property>
+                <item>
+                 <widget class="QTreeWidget" name="logDetailTree">
+                  <property name="alternatingRowColors"><bool>true</bool></property>
+                  <property name="uniformRowHeights"><bool>true</bool></property>
+                  <column><property name="text"><string>项目</string></property></column>
+                  <column><property name="text"><string>值</string></property></column>
+                 </widget>
+                </item>
+               </layout>
+              </widget>
+              <widget class="QWidget" name="logRawPage">
+               <attribute name="title"><string>原始记录</string></attribute>
+               <layout class="QVBoxLayout" name="logRawLayout">
+                <property name="leftMargin"><number>0</number></property><property name="topMargin"><number>6</number></property><property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property>
+                <item><widget class="QPlainTextEdit" name="logRawText"><property name="readOnly"><bool>true</bool></property><property name="lineWrapMode"><enum>QPlainTextEdit::LineWrapMode::NoWrap</enum></property></widget></item>
+               </layout>
+              </widget>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </widget>
+        </item>
+       </layout>
+      </widget>
+      <widget class="QWidget" name="historyPage">
+       <attribute name="title"><string>历史曲线</string></attribute>
+       <layout class="QVBoxLayout" name="historyLayout">
+        <item>
+         <widget class="QSplitter" name="historySplitter">
+          <property name="orientation"><enum>Qt::Orientation::Horizontal</enum></property><property name="childrenCollapsible"><bool>false</bool></property>
+          <widget class="QWidget" name="historyTreePanel">
+           <property name="minimumSize"><size><width>260</width><height>0</height></size></property><property name="maximumSize"><size><width>480</width><height>16777215</height></size></property>
+           <layout class="QVBoxLayout" name="historyTreePanelLayout">
+            <item><widget class="QLabel" name="historyTreeTitleLabel"><property name="text"><string>四遥点选择（可多选）</string></property></widget></item>
+            <item><widget class="QTreeWidget" name="historyTree"><property name="alternatingRowColors"><bool>true</bool></property><property name="selectionMode"><enum>QAbstractItemView::SelectionMode::ExtendedSelection</enum></property><property name="headerHidden"><bool>true</bool></property><column><property name="text"><string>四遥点</string></property></column></widget></item>
+            <item><layout class="QHBoxLayout" name="historyTreeButtonLayout"><item><widget class="QPushButton" name="historyRefreshTreeButton"><property name="text"><string>刷新点表</string></property></widget></item><item><spacer name="historyTreeButtonSpacer"><property name="orientation"><enum>Qt::Orientation::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item></layout></item>
+           </layout>
+          </widget>
+          <widget class="QWidget" name="historyCurvePanel">
+           <layout class="QVBoxLayout" name="historyCurvePanelLayout" stretch="0,0,1">
+            <item><layout class="QHBoxLayout" name="historyFilterLayout"><item><widget class="QLabel" name="historyStartLabel"><property name="text"><string>开始时刻</string></property></widget></item><item><widget class="QLineEdit" name="historyStartEdit"><property name="maximumSize"><size><width>120</width><height>16777215</height></size></property><property name="text"><string>00:00:00</string></property></widget></item><item><widget class="QLabel" name="historyEndLabel"><property name="text"><string>结束时刻</string></property></widget></item><item><widget class="QLineEdit" name="historyEndEdit"><property name="maximumSize"><size><width>120</width><height>16777215</height></size></property><property name="placeholderText"><string>留空表示全部</string></property></widget></item><item><widget class="QPushButton" name="historyQueryButton"><property name="text"><string>绘制曲线</string></property></widget></item><item><spacer name="historyFilterSpacer"><property name="orientation"><enum>Qt::Orientation::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item></layout></item>
+            <item><widget class="QLabel" name="historyStatusLabel"><property name="text"><string>请在左侧勾选四遥点</string></property></widget></item>
+            <item><widget class="QFrame" name="historyPlotFrame"><property name="frameShape"><enum>QFrame::Shape::StyledPanel</enum></property></widget></item>
+           </layout>
+          </widget>
+         </widget>
+        </item>
+       </layout>
+      </widget>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QStatusBar" name="statusbar"/>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
