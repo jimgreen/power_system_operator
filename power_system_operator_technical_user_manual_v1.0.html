@@ -519,8 +519,8 @@
         <a href="#appendix">18. 附录</a>
       </nav>
       <div class="sidebar-foot">
-        发布基线<br>
-        <span class="mono">未提交工作树</span><br><br>
+        软件基线提交<br>
+        <span class="mono">fc4f3b5b298acf0e8bfa9427876e6414187abff6</span><br><br>
         更新日期：2026-08-24
       </div>
     </aside>
@@ -541,7 +541,7 @@
           <div class="cover-meta">
             <div><span>文档版本</span><strong>V1.0</strong></div>
             <div><span>软件版本</span><strong>0.1.0</strong></div>
-            <div><span>发布基线</span><strong>未提交工作树</strong></div>
+            <div><span>软件基线</span><strong>fc4f3b5b</strong></div>
             <div><span>发布日期</span><strong>2026-08-24</strong></div>
           </div>
         </header>
@@ -1192,7 +1192,7 @@ p_max = calculate_wind_max_power(
             <pre><code>$env:QT_QPA_PLATFORM = 'offscreen'
 python -m pytest -q
 python -m compileall -q .</code></pre>
-            <p>当前未提交工作树验证结果：<strong>102 passed</strong>。测试范围包括数据库结构/迁移、定义导入、并发写、策略边界、时钟回退、四遥协议、未知点告警、决策审计、MMI 自动托管线程、编辑保护、曲线游标和三位小数显示。</p>
+            <p>软件基线提交验证结果：<strong>103 passed</strong>。测试范围包括数据库结构/迁移、定义导入、并发写、策略边界、新任务与时钟回退、四遥协议、未知点告警、决策审计、MMI 自动托管线程、编辑保护、曲线游标和三位小数显示。</p>
 
             <h3>版本信息</h3>
             <div class="table-wrap">
@@ -1202,7 +1202,7 @@ python -m compileall -q .</code></pre>
                   <tr><td>软件包版本</td><td><code>0.1.0</code></td></tr>
                   <tr><td>文档版本</td><td><code>V1.0</code></td></tr>
                   <tr><td>Git 分支</td><td><code>main</code></td></tr>
-                  <tr><td>发布提交</td><td><code>未提交工作树</code></td></tr>
+                  <tr><td>软件基线提交</td><td><code>fc4f3b5b298acf0e8bfa9427876e6414187abff6</code></td></tr>
                   <tr><td>远端</td><td><code>git@github.com:jimgreen/power_system_operator.git</code></td></tr>
                   <tr><td>发布日期</td><td>2026-08-24</td></tr>
                 </tbody>
@@ -1277,7 +1277,7 @@ dev_load.1.p_curr</code></pre>
             </ul>
 
             <div class="footer-note">
-              <strong>文档基线声明：</strong>本手册依据 Power System Operator 软件包 0.1.0 的“单一 MMI 宿主 + Core/IO 两个受管子线程”未提交工作树编制。形成发布提交后应把本处和版本表更新为真实 Git SHA；后续数据库、协议、策略或 MMI 行为发生变化时也必须同步更新。
+              <strong>文档基线声明：</strong>本手册依据 Power System Operator 软件包 0.1.0、软件基线提交 <span class="mono">fc4f3b5b298acf0e8bfa9427876e6414187abff6</span> 的“单一 MMI 宿主 + Core/IO 两个受管子线程”实现编制。本 HTML 的基线标注更新会形成其后的文档提交；后续数据库、协议、策略或 MMI 行为发生变化时必须同步更新软件基线和文档版本。
             </div>
           </section>
         </div>
