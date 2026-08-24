@@ -937,13 +937,18 @@ class OperatorCore:
         self._last_processed_data_time = current_time
         return self.run_decision(current_time, wall_time=wall_time)
 
-    def run_forever(self, poll_seconds: float = 0.5) -> None:
+    def run_forever(self, poll_seconds: float = 0.5, stop_event=None) -> None:
         LOGGER.info("operator_core 已启动，控制表轮询周期 %.3f 秒", poll_seconds)
-        while True:
+        while stop_event is None or not stop_event.is_set():
             started = time.monotonic()
             try:
                 self.tick(started)
             except Exception:
                 LOGGER.exception("operator_core 周期运行失败")
             elapsed = time.monotonic() - started
-            time.sleep(max(0.0, poll_seconds - elapsed))
+            delay = max(0.0, poll_seconds - elapsed)
+            if stop_event is None:
+                time.sleep(delay)
+            elif stop_event.wait(delay):
+                break
+        LOGGER.info("operator_core 运行循环已停止")

@@ -1,12 +1,13 @@
 # Power System Operator
 
-这是一个基于 SQLite、SQLAlchemy 2 和 PyQt6 的微电网操作员系统。各常驻进程使用同一个数据库文件，但每个进程单独创建 SQLAlchemy engine 和短生命周期 Session。
+这是一个基于 SQLite、SQLAlchemy 2 和 PyQt6 的微电网操作员系统。默认运行形态是一个 `operator_mmi` 宿主进程：MMI 启动时自动创建 Core、IO 两个受管工作线程，关闭时先停止 IO、再停止 Core 并等待退出。MMI、Core 线程和 IO 线程访问同一个数据库文件，但每个长期工作线程分别创建 SQLAlchemy engine，并始终使用短生命周期 Session。
 
 工程组成：
 
-- `operator_core.py`：每 0.5 秒读取控制表，根据数据库数据时钟分别触发数据处理与控制决策。
-- `operator_io.py`：默认以 TCP 客户端 Bridge 模式访问外部 `simulator_io`，拉取 YC/YX，发送变化的 YT/YK，并把最近一次连接结果写入 `scada_rtu.status`。
-- `operator_mmi.py`：PyQt6 人机界面，提供运行、停止、暂停、开环、闭环、双周期和双时钟操作。
+- `power_operator/runtime_threads.py`：MMI 子线程生命周期控制器，按 Core → IO 启动、按 IO → Core 停止；模拟器新任务或时钟回退恢复时只重启受管 Core 线程。
+- `operator_core.py`：Core 的独立测试/运维入口；默认桌面运行由 MMI 内的 Core 子线程每 0.5 秒读取控制表并执行数据处理与控制决策。
+- `operator_io.py`：IO 的独立兼容入口；默认桌面运行由 MMI 内的 IO 子线程以 TCP Bridge 模式访问外部 `simulator_io`，拉取 YC/YX、发送 YT/YK并更新 `scada_rtu.status`。
+- `operator_mmi.py`：默认唯一常驻 PyQt6 宿主，启动后自动启动 Core、IO 子线程，提供运行、停止、暂停、开环、闭环、双周期和双时钟操作。
 - `operator_mmi_qt.ui`：Qt Designer 界面源文件。
 - `operator_mmi_qt.py`：由 `pyuic6` 从 `.ui` 文件生成的界面代码。
 - `simulator_io_mock.py`：独立的内存 TCP Mock，仅用于本地联调，不读写正式数据库。
@@ -47,19 +48,20 @@ python import_power_definitions.py --source ..\power_system_simulator\power.db -
 | `oper_period` | 1 | 控制决策的单调墙钟周期，单位秒 |
 | `data_time_curr` | 0 | 最近成功写入的数据时刻 |
 | `oper_time_curr` | 0 | 最近完成控制的时刻 |
+| `source_run_seq` | 0 | 当前已同步的模拟器任务序号 |
+| `source_time_start` | 0 | 当前模拟器任务的起始运行时刻 |
+| `source_runtime_ready` | 0 | 首个有效断面是否已就绪；1 时 Core 才可运行 |
 
-## 推荐启动顺序
+## 推荐启动方式
 
-使用演示库进行完整联调时，在四个终端中依次执行：
+使用演示库进行完整联调时，只需要两个终端：先启动外部 Mock，再启动 MMI。MMI 会自动按 Core → IO 的顺序启动两个子线程：
 
 ```powershell
 python simulator_io_mock.py --host 127.0.0.1 --port 9200
-python operator_io.py --db ems_demo.db --mode bridge --simulator-host 127.0.0.1 --simulator-port 9200
-python operator_core.py --db ems_demo.db --poll 0.5
-python operator_mmi.py --db ems_demo.db
+python operator_mmi.py --db ems_demo.db --simulator-host 127.0.0.1 --simulator-port 9200
 ```
 
-在 MMI 顶部选择开环或闭环，设置数据周期和决策周期，点击“保存参数”，然后点击“启动 / 继续”。数据周期和决策周期都按墙钟秒配置；内核在停止或暂停期间仍每 0.5 秒检查一次控制表，所以不需要重启进程。
+在 MMI 顶部选择开环或闭环，设置数据周期和决策周期，点击“保存参数”，然后点击“启动 / 继续”。数据周期和决策周期都按墙钟秒配置；Core 子线程在停止或暂停期间仍每 0.5 秒检查一次控制表，所以不需要重启程序。关闭 MMI 时，IO 和 Core 子线程会自动停止。`--no-workers` 只用于无头截图、测试或维护，不是正常运行方式。
 
 一次性运维计算入口：
 
@@ -229,6 +231,10 @@ operator_io --TCP client--> simulator_io
 ```json
 {
   "ok": true,
+  "run_seq": 7,
+  "simu_status": 1,
+  "simu_time_start": 0,
+  "runtime_ready": true,
   "simu_time": 2,
   "data": {
     "yc": [
@@ -250,16 +256,18 @@ operator_io --TCP client--> simulator_io
 
 顶层 `simu_time` 是模拟器返回的权威时钟，即使 YC/YX 查询数组为空也必须存在。Bridge 不得用请求中的建议时刻或本机墙钟补造该字段；收到成功响应后把它原样写入 `operator_control.data_time_curr`。点内 `time` 是该点自身的数据时刻，只有 `0 < time <= simu_time` 的项才更新本地已有 YC/YX；`time=0` 占位只用于保持位置，不产生业务响应。Bridge 根据原请求数组的位置恢复本地点号，只修改本地已有点的 `value/time`，绝不修改 `pnt_no/name`。RTU `refresh_time` 写本次成功交换的 Unix 墙钟，三种时刻语义不得混用。真实模拟器与开发 Mock 均使用 `data.yc/data.yx` 的相同位置协议。
 
-当响应 `simu_time < operator_control.data_time_curr` 时，说明电网模拟器已经归零重启。Bridge 必须严格执行以下恢复顺序：
+新版模拟器响应还会成组返回 `run_seq`、`simu_time_start`、`simu_status` 和 `runtime_ready`。`run_seq` 是权威任务身份：序号变化时，即使新任务时刻前进或不变，也必须停止 Core 并清理旧任务运行数据。只有 `runtime_ready=true` 且本包至少包含一个正时标、非空值的 YC/YX，才认为首个有效断面已经就绪；在此之前 EMS 只同步任务元数据和包级时刻，Core 保持停止。首断面提交后再恢复 Core。完全不含 `run_seq` 的旧模拟器和开发 Mock 继续使用原有时钟回退兼容逻辑。
 
-1. 读取数据库专用 PID 文件，校验 PID 对应的脚本路径和数据库路径，只停止目标 `operator_core`，并确认进程已经退出；若停止或归属校验失败，禁止回退时钟或清理数据。
+当 `run_seq` 变化，或同一任务的响应满足 `simu_time < operator_control.data_time_curr` 时，Bridge 必须严格执行以下恢复顺序：
+
+1. IO 通过 MMI 注入的 `CoreThreadController` 设置停止事件并等待受管 Core 子线程退出；若停止失败或超时，禁止回退时钟或清理数据。
 2. 在一个短事务中先把 `data_time_curr`、`oper_time_curr` 归零，再清空 `operator_history`、`operator_log` 和四张四遥历史表。
 3. 保留四遥点号和名称，把所有 YC/YX/YT/YK 的值及 `time` 归零；首页曲线是代码内置配置，没有需要清理的曲线配置表。
 4. 把 Bridge 的数据周期计时、控制发送周期计时、YT 游标和 YK 游标全部归零。
-5. 在同一个事务中按原请求位置应用本批 `time > 0` 的 YC/YX，点的 `time` 使用各自响应项时刻，把 `data_time_curr` 更新为包级 `simu_time`，并用 Unix 墙钟更新 RTU `refresh_time`；零时刻占位保持归零状态且不影响后续位置。
-6. 事务提交成功后，使用当前 Python、明确的 `operator_core.py`、数据库路径和轮询参数重新启动 Core；若事务失败必须完整回滚并尝试恢复原 Core。
+5. 在同一个事务中保存任务元数据；只有首个有效断面已就绪时才按原请求位置应用本批 `time > 0` 的 YC/YX。点的 `time` 使用各自响应项时刻，`data_time_curr` 更新为包级 `simu_time`，RTU `refresh_time` 使用 Unix 墙钟；零时刻占位保持归零状态且不影响后续位置。
+6. 首个有效断面事务提交成功后，使用同一 MMI 线程控制器和数据库路径重新启动 Core 子线程；未就绪时保持 Core 停止，后续轮询不得重复停止同一线程。事务失败必须完整回滚，并按进入恢复前的状态决定是否恢复 Core。
 
-`operator_core` 默认把按数据库绝对路径唯一生成的 PID 文件写入数据库同目录的 `.runtime`。IO 使用 PID 文件元数据、活动进程命令行、Core 脚本绝对路径和数据库绝对路径进行交叉验证，不能按进程名批量终止 Python。
+默认 MMI 托管模式不为 Core 子线程创建独立 PID 文件，线程控制器只管理自己创建的线程对象、停止事件和线程代次，不能终止其他线程或 Python 进程。显式运行独立 `operator_core.py`/`operator_io.py` 时仍保留原 PID 文件和 `CoreProcessManager` 兼容机制，但不得与默认 MMI 托管模式同时运行。
 
 Bridge 每 1 秒检查一次变化的 YT/YK，并发送：
 
@@ -284,7 +292,7 @@ python operator_io.py --db ems.db --mode server --listen-host 127.0.0.1 --listen
 python rtu_client.py --host 127.0.0.1 --port 9100 --rtu-id 1 --period 1 --measurements sample_measurements.json
 ```
 
-## SQLite 多进程并发
+## SQLite 多线程与外部多进程并发
 
 SQLite 允许多个并发读者，但同一时刻只有一个写事务。本工程不使用只能保护单进程的 Python 全局锁，而采用数据库级措施：
 
@@ -292,7 +300,7 @@ SQLite 允许多个并发读者，但同一时刻只有一个写事务。本工�
 2. `PRAGMA busy_timeout=10000`：短暂写锁最多等待 10 秒。
 3. 短事务：Bridge 交换、内核处理、MMI 保存均快速提交，不跨网络调用持有数据库写锁。
 4. 有限重试：仅对 SQLite `locked`/`busy` 错误最多重试 7 次，采用指数退避和随机抖动；业务异常直接抛出。
-5. 每进程独立 engine：禁止跨进程传递 SQLAlchemy `Engine` 或 `Session`。
+5. 每个长期工作线程独立 engine：MMI、Core、IO 分别创建 `Database/Engine`，禁止跨线程传递 `Session`；外部工具或兼容独立进程同样必须创建自己的 engine。
 
 若未来出现大量高频写者、长事务或远程数据库访问，应改用 PostgreSQL 等服务型数据库，而不是不断延长锁等待。
 

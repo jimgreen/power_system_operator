@@ -22,10 +22,11 @@ T = TypeVar("T")
 
 
 class Database:
-    """A process-local SQLAlchemy facade around the shared SQLite file.
+    """A worker-local SQLAlchemy facade around the shared SQLite file.
 
-    WAL and busy_timeout are SQLite's cross-process concurrency mechanisms.
-    Each process must create its own ``Database``/engine instance.
+    WAL and busy_timeout are SQLite's cross-process/cross-thread concurrency
+    mechanisms. Each long-lived process or worker thread creates its own
+    ``Database``/engine instance and never shares a ``Session``.
     """
 
     def __init__(self, path: str | Path = "ems.db", busy_timeout_ms: int = 10_000):
@@ -114,6 +115,9 @@ def initialize_database(database: Database) -> None:
                     oper_period=1,
                     data_time_curr=0,
                     oper_time_curr=0,
+                    source_run_seq=0,
+                    source_time_start=0,
+                    source_runtime_ready=0,
                 )
             )
     database.write(seed)
@@ -193,6 +197,9 @@ def _migrate_existing_schema(database: Database) -> None:
             "io_connect_enabled": "INTEGER NOT NULL DEFAULT 1",
             "data_period": "INTEGER NOT NULL DEFAULT 1",
             "data_time_curr": "INTEGER NOT NULL DEFAULT 0",
+            "source_run_seq": "INTEGER NOT NULL DEFAULT 0",
+            "source_time_start": "INTEGER NOT NULL DEFAULT 0",
+            "source_runtime_ready": "INTEGER NOT NULL DEFAULT 0",
         }
         with database.engine.begin() as connection:
             for name, definition in additions.items():
@@ -209,6 +216,9 @@ def _migrate_existing_schema(database: Database) -> None:
             "oper_period",
             "data_time_curr",
             "oper_time_curr",
+            "source_run_seq",
+            "source_time_start",
+            "source_runtime_ready",
         ]
         columns = [
             column["name"]
@@ -229,7 +239,10 @@ def _migrate_existing_schema(database: Database) -> None:
                         data_period INTEGER NOT NULL DEFAULT 1,
                         oper_period INTEGER NOT NULL DEFAULT 1,
                         data_time_curr INTEGER NOT NULL DEFAULT 0,
-                        oper_time_curr INTEGER NOT NULL DEFAULT 0
+                        oper_time_curr INTEGER NOT NULL DEFAULT 0,
+                        source_run_seq INTEGER NOT NULL DEFAULT 0,
+                        source_time_start INTEGER NOT NULL DEFAULT 0,
+                        source_runtime_ready INTEGER NOT NULL DEFAULT 0
                     )
                     """
                 )
@@ -237,10 +250,12 @@ def _migrate_existing_schema(database: Database) -> None:
                     """
                     INSERT INTO operator_control__migrated (
                         id, oper_status, control_status, io_connect_enabled, data_period,
-                        oper_period, data_time_curr, oper_time_curr
+                        oper_period, data_time_curr, oper_time_curr, source_run_seq,
+                        source_time_start, source_runtime_ready
                     )
-                    SELECT id, oper_status, control_status, io_connect_enabled, data_period,
-                           oper_period, data_time_curr, oper_time_curr
+                        SELECT id, oper_status, control_status, io_connect_enabled, data_period,
+                           oper_period, data_time_curr, oper_time_curr, source_run_seq,
+                           source_time_start, source_runtime_ready
                     FROM operator_control
                     """
                 )

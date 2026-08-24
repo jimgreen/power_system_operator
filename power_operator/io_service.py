@@ -395,6 +395,7 @@ class OperatorIoBridge:
         self._last_yt_time = 0
         self._last_yk_time = 0
         self._connection_status: int | None = None
+        self._core_suspended_run_seq: int | None = None
 
     def mark_disconnected(self) -> None:
         """Persist the bridge connection state without changing its last good data time."""
@@ -479,6 +480,14 @@ class OperatorIoBridge:
     def _pull_measurements(self, current_time: int, data_period: int) -> bool:
         requested_time = current_time + data_period
         with self.database.session() as session:
+            control = session.get(OperatorControl, 1)
+            saved_run_seq = int(control.source_run_seq) if control is not None else 0
+            saved_time_start = (
+                int(control.source_time_start) if control is not None else 0
+            )
+            saved_runtime_ready = (
+                int(control.source_runtime_ready) if control is not None else 0
+            )
             requested_yc = [
                 int(point.pnt_no)
                 for point in session.scalars(
@@ -505,6 +514,31 @@ class OperatorIoBridge:
         response_time = _number(response["simu_time"], int, "simu_time")
         if response_time < 0:
             raise ValueError("simulator_io 的 simu_time 不能为负数")
+        has_run_metadata = "run_seq" in response
+        if has_run_metadata:
+            response_run_seq = _number(response["run_seq"], int, "run_seq")
+            response_time_start = _number(
+                response.get("simu_time_start"), int, "simu_time_start"
+            )
+            response_status = _number(
+                response.get("simu_status"), int, "simu_status"
+            )
+            response_runtime_ready = response.get("runtime_ready")
+            if response_run_seq < 0:
+                raise ValueError("simulator_io 的 run_seq 不能为负数")
+            if response_time_start < 0:
+                raise ValueError("simulator_io 的 simu_time_start 不能为负数")
+            if response_status not in (0, 1, 2):
+                raise ValueError("simulator_io 的 simu_status 必须是0、1或2")
+            if not isinstance(response_runtime_ready, bool):
+                raise ValueError("simulator_io 的 runtime_ready 必须是布尔值")
+        else:
+            # Compatibility for development mocks and older peers.  A legacy
+            # packet cannot declare a task boundary, so preserve the established
+            # clock-rollback behavior until all peers have upgraded.
+            response_run_seq = saved_run_seq
+            response_time_start = saved_time_start
+            response_runtime_ready = True
         refresh_wall_time = int(self.wall_clock())
 
         nested_data = response.get("data")
@@ -533,7 +567,19 @@ class OperatorIoBridge:
             "YX",
         )
 
-        clock_rollback = response_time < current_time
+        valid_measurement_received = any(
+            int(row["time"]) > 0 and row.get("value") is not None
+            for row in (*yc_rows, *yx_rows)
+        )
+        packet_ready = bool(response_runtime_ready and valid_measurement_received)
+        run_changed = has_run_metadata and response_run_seq != saved_run_seq
+        clock_rollback = response_time < current_time and not run_changed
+        pending_run = has_run_metadata and saved_runtime_ready == 0
+        first_sync_for_pending_run = (
+            pending_run and self._core_suspended_run_seq != response_run_seq
+        )
+        lifecycle_reset = run_changed or clock_rollback or first_sync_for_pending_run
+        manage_core = lifecycle_reset or pending_run
 
         def apply(session: Session) -> bool:
             control = session.get(OperatorControl, 1)
@@ -543,12 +589,17 @@ class OperatorIoBridge:
                 or int(control.io_connect_enabled) != 1
             ):
                 return False
-            if clock_rollback:
+            if lifecycle_reset:
                 self._clear_runtime_for_clock_rollback(session)
+            if has_run_metadata:
+                control.source_run_seq = response_run_seq
+                control.source_time_start = response_time_start
+                control.source_runtime_ready = int(packet_ready)
+            rows_are_usable = not has_run_metadata or packet_ready
             update_existing_scada_points(
                 session,
                 ScadaYc,
-                yc_rows,
+                yc_rows if rows_are_usable else [],
                 response_time,
                 log_wall_time=refresh_wall_time,
                 source="operator_io.bridge",
@@ -557,7 +608,7 @@ class OperatorIoBridge:
             update_existing_scada_points(
                 session,
                 ScadaYx,
-                yx_rows,
+                yx_rows if rows_are_usable else [],
                 response_time,
                 log_wall_time=refresh_wall_time,
                 source="operator_io.bridge",
@@ -584,14 +635,22 @@ class OperatorIoBridge:
             control.data_time_curr = response_time
             return True
 
-        if not clock_rollback:
+        if not manage_core:
             self.database.write(apply)
             self._connection_status = 1
             return False
 
-        # Process actions stay outside the SQLite write transaction.  No local
-        # clock or runtime data may move until the target Core has exited.
-        self.core_process_manager.stop_and_wait()
+        # Lifecycle actions stay outside the SQLite write transaction.  A new
+        # run is authoritative even when its clock moves forward or is equal.
+        core_already_suspended = (
+            has_run_metadata
+            and self._core_suspended_run_seq == response_run_seq
+        )
+        if not core_already_suspended:
+            self.core_process_manager.stop_and_wait()
+            self._core_suspended_run_seq = (
+                response_run_seq if has_run_metadata else None
+            )
         previous_period_state = (
             self._last_data_monotonic,
             self._last_control_monotonic,
@@ -609,17 +668,13 @@ class OperatorIoBridge:
                 self._last_yk_time,
             ) = previous_period_state
             try:
-                self.core_process_manager.start()
+                if not has_run_metadata or saved_runtime_ready:
+                    self.core_process_manager.start()
+                    self._core_suspended_run_seq = None
             except Exception:
-                LOGGER.exception("时钟回退事务失败后恢复 operator_core 失败")
+                LOGGER.exception("任务切换事务失败后恢复 operator_core 失败")
             raise
 
-        try:
-            self.core_process_manager.start()
-        except Exception:
-            # The database reset is already committed.  Leave the period state
-            # at zero and surface the restart failure so RTU status becomes 0.
-            raise
         if not applied:
             (
                 self._last_data_monotonic,
@@ -627,13 +682,40 @@ class OperatorIoBridge:
                 self._last_yt_time,
                 self._last_yk_time,
             ) = previous_period_state
+            if not has_run_metadata or saved_runtime_ready:
+                self.core_process_manager.start()
+                self._core_suspended_run_seq = None
             return False
+        if not has_run_metadata or packet_ready:
+            try:
+                self.core_process_manager.start()
+                self._core_suspended_run_seq = None
+            except Exception:
+                # The reset is already committed. Leave the period state at
+                # zero and surface the failure so RTU status becomes offline.
+                raise
         self._connection_status = 1
-        LOGGER.warning(
-            "检测到电网模拟器时钟回退 %d -> %d；已停止 Core、清理运行数据、应用新数据并重启 Core",
-            current_time,
-            response_time,
-        )
+        if run_changed:
+            LOGGER.warning(
+                "检测到电网模拟器新任务 run_seq=%d -> %d，时刻=%d -> %d；"
+                "已清理本地运行数据，runtime_ready=%s",
+                saved_run_seq,
+                response_run_seq,
+                current_time,
+                response_time,
+                packet_ready,
+            )
+        elif clock_rollback:
+            LOGGER.warning(
+                "检测到电网模拟器时钟回退 %d -> %d；已清理本地运行数据",
+                current_time,
+                response_time,
+            )
+        elif packet_ready:
+            LOGGER.info(
+                "电网模拟器任务 run_seq=%d 首个有效断面已就绪，Core 已恢复",
+                response_run_seq,
+            )
         return True
 
     @staticmethod
@@ -711,12 +793,17 @@ class OperatorIoBridge:
             self.mark_disconnected()
             raise
 
-    def run_forever(self, poll_seconds: float = 0.5) -> None:
-        LOGGER.info("operator_io 桥接进程已启动")
-        while True:
+    def run_forever(self, poll_seconds: float = 0.5, stop_event=None) -> None:
+        LOGGER.info("operator_io 桥接循环已启动")
+        while stop_event is None or not stop_event.is_set():
             started = time.monotonic()
             try:
                 self.tick(started)
             except Exception:
                 LOGGER.exception("operator_io 交换失败")
-            time.sleep(max(0.0, poll_seconds - (time.monotonic() - started)))
+            delay = max(0.0, poll_seconds - (time.monotonic() - started))
+            if stop_event is None:
+                time.sleep(delay)
+            elif stop_event.wait(delay):
+                break
+        LOGGER.info("operator_io 桥接循环已停止")

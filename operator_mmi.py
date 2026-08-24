@@ -61,6 +61,7 @@ from power_operator.models import (
     OperatorLog,
 )
 from power_operator.plot_widget import CurveSeries, InteractivePlot
+from power_operator.runtime_threads import OperatorRuntimeThreads
 from power_operator.time_utils import (
     format_float,
     format_simu_time,
@@ -162,9 +163,15 @@ class EditorSpec:
 
 
 class OperatorMainWindow(QMainWindow):
-    def __init__(self, database: Database):
+    def __init__(
+        self,
+        database: Database,
+        runtime: OperatorRuntimeThreads | None = None,
+    ):
         super().__init__()
         self.database = database
+        self.runtime = runtime
+        self._runtime_started = False
         self.current_value_edits: dict[str, QLineEdit] = {}
         self.current_value_cards: dict[str, QFrame] = {}
         self._home_curve_tree_signature: tuple[tuple[Any, ...], ...] = ()
@@ -214,6 +221,9 @@ class OperatorMainWindow(QMainWindow):
         self.refresh_timer.start(1000)
         if self.ui.mainTabs.currentIndex() in (1, 2, 3, 4):
             self.periodic_page_timer.start()
+        if self.runtime is not None:
+            self.runtime.start()
+            self._runtime_started = True
 
     def _install_plots(self) -> None:
         self.home_plot = InteractivePlot("系统运行曲线", self.ui.homePlotFrame)
@@ -1366,22 +1376,67 @@ class OperatorMainWindow(QMainWindow):
         self.refresh_history_plot()
 
     def closeEvent(self, event) -> None:  # noqa: N802
-        self.database.dispose()
-        event.accept()
+        self.refresh_timer.stop()
+        self.periodic_page_timer.stop()
+        try:
+            if self.runtime is not None and self._runtime_started:
+                self.runtime.stop_and_wait()
+                self._runtime_started = False
+        except Exception:
+            LOGGER.exception("关闭 MMI 时停止 Core/IO 子线程失败")
+        finally:
+            self.database.dispose()
+            event.accept()
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="电力系统操作员 MMI")
     parser.add_argument("--db", default="ems.db", help="SQLite 数据库文件，默认 ems.db")
+    parser.add_argument("--simulator-host", default="127.0.0.1")
+    parser.add_argument("--simulator-port", type=int, default=9001)
+    parser.add_argument("--rtu-id", type=int, default=1)
+    parser.add_argument("--poll", type=float, default=0.5, help="IO 子线程轮询周期（秒）")
+    parser.add_argument("--core-poll", type=float, default=0.5, help="Core 子线程轮询周期（秒）")
+    parser.add_argument("--worker-start-timeout", type=float, default=10.0)
+    parser.add_argument("--worker-stop-timeout", type=float, default=10.0)
+    parser.add_argument(
+        "--no-workers",
+        action="store_true",
+        help="仅启动界面，不启动 Core/IO 子线程（仅测试或维护使用）",
+    )
     args = parser.parse_args()
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s [%(threadName)s] %(name)s: %(message)s",
+    )
     database = Database(args.db)
     initialize_database(database)
     application = QApplication(sys.argv)
     application.setApplicationName("Power System Operator")
-    window = OperatorMainWindow(database)
-    window.show()
-    sys.exit(application.exec())
+    runtime = None
+    if not args.no_workers:
+        runtime = OperatorRuntimeThreads(
+            database_path=database.path,
+            simulator_host=args.simulator_host,
+            simulator_port=args.simulator_port,
+            rtu_id=args.rtu_id,
+            poll_seconds=max(0.05, args.poll),
+            core_poll_seconds=max(0.05, args.core_poll),
+            startup_timeout=max(0.1, args.worker_start_timeout),
+            stop_timeout=max(0.1, args.worker_stop_timeout),
+        )
+    try:
+        window = OperatorMainWindow(database, runtime=runtime)
+        window.show()
+        exit_code = application.exec()
+    finally:
+        if runtime is not None:
+            try:
+                runtime.stop_and_wait()
+            except Exception:
+                LOGGER.exception("MMI 退出清理 Core/IO 子线程失败")
+        database.dispose()
+    raise SystemExit(exit_code)
 
 
 if __name__ == "__main__":

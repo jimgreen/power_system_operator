@@ -4,13 +4,17 @@
 
 > 2026-08-24 更新：将 `power_system_operator_technical_user_manual_v1.0.html` 纳入强制交付物，补充手册内容边界、真实 MMI 界面截图、分步用户操作说明、Base64 单文件离线版式、响应式/A4 打印要求以及真实浏览器验收标准。
 
-> 2026-08-24 发布规范更新：补充“保存修改、提交远方、重启服务”的完整执行边界，要求显式暂存清单、测试后提交、四方 Git SHA 一致性、按脚本和数据库精确停启三个本项目进程、保护外部电网模拟器，并以新 PID、端口归属、PID 文件、数据库、RTU 墙钟、运行日志和真实 MMI 窗口作为发布后健康证据。
+> 2026-08-24 发布规范更新：补充“保存修改、提交远方、重启服务”的完整执行边界，要求显式暂存清单、测试后提交、四方 Git SHA 一致性、按脚本和数据库精确重启 MMI 宿主及其两个受管子线程、保护外部电网模拟器，并以新宿主 PID、线程快照、端口归属、数据库、RTU 墙钟、运行日志和真实 MMI 窗口作为发布后健康证据。
+
+> 2026-08-24 线程架构更新：默认运行形态改为一个 `operator_mmi` 宿主进程自动托管 Core、IO 两个工作线程；MMI 启动即按 Core → IO 启动，关闭时按 IO → Core 停止并等待，模拟器新任务或时钟回退恢复只停启受管 Core 线程。独立 Core/IO 入口仅保留给测试和兼容运维，不得与默认托管模式并行运行。
+
+> 2026-08-24 模拟器任务同步更新：YC/YX 成功响应可携带 `run_seq`、`simu_time_start`、`simu_status`、`runtime_ready`。EMS 以 `run_seq` 变化识别新的模拟任务，不再只依赖运行时刻回退；新任务首个有效断面就绪前必须保持 Core 暂停，完成运行数据清理和首断面同步后再恢复 Core。没有任务元数据的旧模拟器和 Mock 继续使用原时钟回退兼容逻辑。
 
 ---
 
 ## 提示词正文开始
 
-你是一名资深 Python、SQLAlchemy、SQLite、多进程服务、TCP 协议和 PyQt6 工程师。请直接创建一个完整、可运行、可测试的“电力系统操作员”桌面软件工程。
+你是一名资深 Python、SQLAlchemy、SQLite、多线程/多进程并发服务、TCP 协议和 PyQt6 工程师。请直接创建一个完整、可运行、可测试的“电力系统操作员”桌面软件工程。
 
 不要只给设计说明、伪代码、局部代码或文件清单。必须在当前工作目录中创建全部源文件、Qt `.ui` 文件、由 `pyuic6` 生成的 Python 文件、数据库初始化脚本、示例数据脚本、TCP Mock、自动化测试、README 和独立 HTML 技术与使用手册，并实际运行验证命令。若当前目录已有文件，应保留无关内容，不得重置、清理或覆盖不在本任务范围内的用户文件。
 
@@ -18,13 +22,13 @@
 
 ### 一、最终交付目标
 
-交付一个包含以下独立进程的完整工程：
+交付一个默认采用“单一 MMI 宿主进程 + Core/IO 两个受管子线程”的完整工程：
 
-1. `operator_core`：常驻计算内核，使用 SQLAlchemy 访问 SQLite 数据库，每 0.5 秒检查一次运行控制状态，根据数据时钟执行数据处理，根据决策时钟执行新能源优先控制策略。
+1. `operator_mmi`：默认唯一常驻 PyQt6 桌面宿主进程。启动 MMI 后自动创建并启动 Core、IO 两个子线程，支持运行控制、开环/闭环、双周期、双时钟、主页曲线、设备定义、四遥定义、运行日志、历史曲线，以及建立/中断电网模拟器连接；关闭 MMI 时自动停止并等待两个子线程。运行日志必须支持查询并展开浏览每次控制决策的触发条件、完整输入、真实策略过程、完整输出和平衡校验。
 
-2. `operator_io`：常驻交互进程，默认作为 TCP 客户端访问外部 `simulator_io`，按数据周期获取 YC/YX，每 1 秒发送变化的 YT/YK；保留一个显式启用的兼容 TCP Server 模式。
+2. Core 子线程：使用独立 SQLAlchemy `Database/Engine` 访问同一个 SQLite 文件，每 0.5 秒检查运行控制状态，根据数据时钟执行数据处理，根据决策时钟执行新能源优先策略。`operator_core.py` 只保留为一次性测试或显式独立运维入口。
 
-3. `operator_mmi`：常驻 PyQt6 桌面人机界面，使用 SQLAlchemy 访问同一个 SQLite 文件，支持运行控制、开环/闭环、双周期、双时钟、主页曲线、设备定义、四遥定义、运行日志、历史曲线，以及建立/中断电网模拟器连接；运行日志必须支持查询并展开浏览每次控制决策的触发条件、完整输入、真实策略过程、完整输出和平衡校验。
+3. IO 子线程：使用独立 SQLAlchemy `Database/Engine`，默认作为 TCP 客户端访问外部 `simulator_io`，按数据周期获取 YC/YX，每 1 秒发送变化的 YT/YK；时钟回退时通过受管线程控制器停启 Core 子线程。`operator_io.py` 只保留显式独立兼容入口和 TCP Server 模式。
 
 4. `simulator_io_mock`：独立的 TCP Mock 服务，只在内存中维护数据，用于本地完整联调，不读写正式数据库。
 
@@ -44,13 +48,13 @@
 
 - PyQt6 6.5 或更高版本。
 
-- psutil 5.9 或更高版本，用于严格校验并管理目标 Core 进程。
+- psutil 5.9 或更高版本，只用于显式独立 Core/IO 兼容入口的进程归属校验；默认 MMI 托管模式不得通过 psutil 停启 Core/IO。
 
 - pytest 8 或更高版本。
 
 - 使用 `pyproject.toml` 声明依赖和 pytest 配置。
 
-- `operator_core`、`operator_io` 和 `operator_mmi` 的业务运行不依赖 Web 浏览器或 Web 服务。HTML 手册只作为离线文档交付和验收对象，不得被引入业务运行依赖。
+- MMI 宿主以及 Core、IO 子线程的业务运行不依赖 Web 浏览器或 Web 服务。HTML 手册只作为离线文档交付和验收对象，不得被引入业务运行依赖。
 
 - 曲线控件优先使用 PyQt6 自带的 `QPainter` 实现，避免引入大型绘图库；若选择其他库，必须加入依赖并证明新环境安装后可以直接运行。
 
@@ -100,6 +104,7 @@ power_operator/
     database.py
     core.py
     core_process.py
+    runtime_threads.py
     command_points.py
     measurement_points.py
     status_commands.py
@@ -120,6 +125,7 @@ tests/
     test_core.py
     test_core_v2.py
     test_core_process.py
+    test_runtime_threads.py
     test_protocol.py
     test_tcp_service.py
     test_io_bridge.py
@@ -303,12 +309,16 @@ tests/
 | `oper_period` | int | 初值 1；控制决策的单调墙钟周期，秒，最小 1 |
 | `data_time_curr` | int | 初值 0；最近成功写入数据的运行时刻 |
 | `oper_time_curr` | int | 初值 0；最近完成控制决策的运行时刻 |
+| `source_run_seq` | int | 初值 0；当前已同步的模拟器任务序号；变化表示新的权威任务边界 |
+| `source_time_start` | int | 初值 0；当前模拟器任务的起始运行时刻 |
+| `source_runtime_ready` | int | 初值 0；0=新任务首个有效断面尚未就绪，1=已就绪且允许 Core 运行 |
 
 控制表物理列顺序必须为：
 
 ```text
 id, oper_status, control_status, io_connect_enabled, data_period,
-oper_period, data_time_curr, oper_time_curr
+oper_period, data_time_curr, oper_time_curr,
+source_run_seq, source_time_start, source_runtime_ready
 ```
 
 #### 4.4 四遥历史表
@@ -345,9 +355,9 @@ INDEX (pnt_no, time)
 |---|---:|---:|---:|
 | `init_db.py`、定义导入、示例库生成 | 允许 | 允许 | 允许 |
 | MMI 四遥定义页的显式用户保存 | 允许 | 允许 | 允许 |
-| `operator_core` 常驻进程 | 禁止 | 禁止 | 仅限本地已有点 |
-| `operator_io` Bridge / 兼容 Server | 禁止 | 禁止 | 仅限本地已有点 |
-| 其他运行期后台进程 | 禁止 | 禁止 | 仅限本地已有点 |
+| `operator-core` 受管子线程 / 独立兼容入口 | 禁止 | 禁止 | 仅限本地已有点 |
+| `operator-io` 受管子线程 / 兼容 Server | 禁止 | 禁止 | 仅限本地已有点 |
+| 其他运行期后台线程或进程 | 禁止 | 禁止 | 仅限本地已有点 |
 
 运行期必须以本地数据库中的 `pnt_no` 作为唯一身份键。通信报文里的 `name` 是不可信的描述信息，只允许用于告警上下文和调试展示，不能参与 INSERT、不能覆盖本地点名，也不能改变点号。收到同点号但不同点名的报文时，必须保留本地 `name`，只更新 `value/time`。
 
@@ -418,7 +428,7 @@ SQLAlchemy `connect_args` 至少包括：
 
 `initialize_database()` 必须幂等，并支持已有旧库升级：
 
-1. 旧 `operator_control` 缺少 `control_status`、`io_connect_enabled`、`data_period`、`data_time_curr` 时补列，其中 `io_connect_enabled` 的迁移默认值必须为 1，以保持既有自动连接行为。
+1. 旧 `operator_control` 缺少 `control_status`、`io_connect_enabled`、`data_period`、`data_time_curr`、`source_run_seq`、`source_time_start`、`source_runtime_ready` 时补列，其中 `io_connect_enabled` 的迁移默认值必须为 1，以保持既有自动连接行为；三个来源任务字段的迁移默认值必须为 0。
 
 2. 若旧控制表字段顺序不同，在确认没有未知扩展列的前提下安全重建表，保留原值并调整到规定顺序。
 
@@ -488,6 +498,9 @@ data_period=1
 oper_period=5
 data_time_curr=0
 oper_time_curr=0
+source_run_seq=0
+source_time_start=0
+source_runtime_ready=0
 ```
 
 示例设备：
@@ -623,7 +636,7 @@ LOG_DECISION = 4
 
 - 提供 `--poll`、`--pid-file` 参数和 `--once` 一次性运行入口。
 
-- 常驻 Core 必须用按数据库绝对路径唯一生成的 PID 文件登记 `pid`、数据库绝对路径、Core 脚本绝对路径和启动墙钟；默认位置为数据库同目录的 `.runtime`。正常退出清除自己的 PID 文件，过期 PID 文件可以安全删除。
+- 默认 Core 以 MMI 的受管子线程运行，循环必须接受 `threading.Event` 等停止事件并用可中断等待替代不可控的永久 `sleep`；线程创建自己的 `Database/Engine`，不使用 MMI Session。显式独立运行 `operator_core.py` 时才使用按数据库绝对路径生成的 PID 文件，并保留 `--poll`、`--pid-file` 和 `--once`。
 
 #### 8.2 停止切换为运行
 
@@ -899,7 +912,7 @@ decision_wall_time
 默认结构必须是：
 
 ```text
-operator_io --TCP client--> simulator_io
+operator_mmi/operator-io 子线程 --TCP client--> simulator_io
 ```
 
 采用 UTF-8 JSON Lines：一条 TCP 连接发送一行 JSON 请求并接收一行 JSON 响应。限制单行最大 2 MiB，设置连接超时，检查 JSON 类型和 `ok` 状态。
@@ -931,6 +944,10 @@ operator_io --TCP client--> simulator_io
 ```json
 {
   "ok": true,
+  "run_seq": 7,
+  "simu_status": 1,
+  "simu_time_start": 0,
+  "runtime_ready": true,
   "simu_time": 2,
   "data": {
     "yc": [
@@ -958,11 +975,15 @@ operator_io --TCP client--> simulator_io
 
 - 已定义点无论 `time` 是否为 0 都必须返回自身 `value/time`。未知点必须在原位置返回 `{"value":null,"time":0}`，不得省略；`simulator_io` 同时向进程日志和模拟器日志表记录未知 YC/YX 点号告警。告警可按表聚合同一批未知点，但不能影响成功响应中其他位置。
 
-- YC/YX/YT/YK 的 `pnt_no`、`name` 和其他定义字段在运行期只读。`operator_core`、`operator_io`、兼容 Server 及其他常驻进程只能修改本地已有点的 `value` 和 `time`；严禁根据通信报文创建点位、覆盖 `name` 或修改 `pnt_no`。本地 `pnt_no` 是运行期更新的唯一身份键，报文 `name` 不参与写库；点位创建和定义修改只能由显式建库、定义导入或 MMI 四遥定义操作完成。
+- YC/YX/YT/YK 的 `pnt_no`、`name` 和其他定义字段在运行期只读。Core/IO 子线程、显式兼容入口和其他后台工作单元只能修改本地已有点的 `value` 和 `time`；严禁根据通信报文创建点位、覆盖 `name` 或修改 `pnt_no`。本地 `pnt_no` 是运行期更新的唯一身份键，报文 `name` 不参与写库；点位创建和定义修改只能由显式建库、定义导入或 MMI 四遥定义操作完成。
 
 - 收到本地表中不存在的 YC/YX/YT/YK 点号时，不得创建点位，也不得使同批其他有效点回滚。必须忽略该未知点，向进程日志输出 WARNING，并在 `operator_log` 写入一条 `log_type=LOG_WARNING` 的 UTF-8 JSON 告警。JSON 的 `event` 固定为 `unknown_scada_point`，至少包含便于浏览的中文 `message`、`schema_version`、`source`、`signal`、`pnt_no`、`received_name` 和 `simu_time`。四种四遥必须使用同一个运行期更新/校验函数，避免不同入口出现不同定义保护行为。
 
 - 成功的 YC/YX 响应顶层必须显式包含非负整数 `simu_time`。它是模拟器权威运行时刻，Bridge 不得在字段缺失时用请求建议值或本机墙钟代替。
+
+- 新版模拟器成功响应还必须成组携带任务元数据：非负整数 `run_seq`、非负整数 `simu_time_start`、取值为 0/1/2 的整数 `simu_status` 和布尔值 `runtime_ready`。只要出现 `run_seq`，其他三个字段就都必须存在且类型、范围正确，否则拒绝整批响应。`run_seq` 是权威任务身份；即使新任务时刻等于或大于本地旧时刻，只要任务序号变化也必须执行 9.2 的新任务恢复流程。为兼容尚未升级的开发 Mock 或旧对端，完全不含 `run_seq` 的响应继续使用已有时钟回退判断，不得伪造任务边界。
+
+- 对带任务元数据的响应，只有 `runtime_ready=true` 且本包至少包含一个 `value != null`、`time > 0` 的 YC/YX 项时，才认为首个有效断面已经就绪。未就绪包可以同步任务序号、任务起始时刻和包级运行时刻，但不得把零时刻占位应用为业务量测，也不得启动 Core；首个有效断面到达并成功提交后才把 `source_runtime_ready=1` 并恢复 Core。
 
 - 响应时刻允许等于本地时刻，也允许在模拟器归零重启后小于本地旧时刻；Bridge 必须把 `operator_control.data_time_curr` 精确同步为响应值，不能使用 `max()` 阻止时钟复位。小于本地时刻时必须先执行 9.2 的完整恢复流程，禁止直接覆盖时钟。
 
@@ -976,34 +997,36 @@ operator_io --TCP client--> simulator_io
 
 - 每次 Bridge tick 先读取 `operator_control.io_connect_enabled`。其值为 0 时不得发起任何 TCP 读取或写入，立即把 RTU `status` 置为 0，但保留 `refresh_time`，并重置周期计时，使其恢复为 1 后下一次 tick 立即尝试连接。
 
-#### 9.2 模拟器时钟回退恢复
+#### 9.2 模拟器新任务与时钟回退恢复
 
-若成功数据响应满足：
+新版响应满足以下任一条件时，必须进入生命周期恢复流程：
 
 ```text
-response.simu_time < operator_control.data_time_curr
+response.run_seq != operator_control.source_run_seq
+或
+response.simu_time < operator_control.data_time_curr 且 run_seq 未变化
 ```
 
-则判定电网模拟器已经归零重启。必须严格执行以下顺序，禁止调换：
+第一种条件表示权威模拟任务已经切换，即使新任务时刻前进或相等也必须清理；第二种表示同一任务内模拟器时钟回退。完全不含任务元数据的旧响应仍按第二种条件兼容。必须严格执行以下顺序，禁止调换：
 
 ```text
-停止并确认 operator_core 退出
+停止并确认受管 Core 子线程退出
 → 本地数据时钟和控制时钟回退到 0
 → 清理历史、日志、四遥实时值/时刻和 Bridge 周期状态
-→ 应用本批新 YC/YX 和权威时刻
+→ 保存任务元数据并应用已就绪的首个有效 YC/YX 断面和权威时刻
 → 提交事务
-→ 重新启动 operator_core
+→ 仅在首个有效断面就绪后重新启动受管 Core 子线程
 ```
 
 具体要求：
 
-1. `operator_io` 必须注入独立的 `CoreProcessManager`。它只能读取当前数据库专用 PID 文件，不得按 `python.exe` 名称批量终止进程。
+1. 默认 IO 子线程必须注入同一 MMI 所有的 `CoreThreadController`，只能停止和重启该控制器创建的 Core 线程，禁止扫描或终止 Python 进程。显式独立 `operator_io.py` 兼容入口仍可注入 `CoreProcessManager`，但不得与 MMI 托管模式同时运行。
 
-2. 停止前必须交叉校验 PID 文件元数据、活动进程命令行、`operator_core.py` 绝对路径和 `--db` 绝对路径。归属不匹配、权限失败或退出超时时，立即报错，禁止修改本地时钟、历史、日志和四遥数据。
+2. 线程控制器必须持有明确的线程对象、停止事件、线程代次、数据库绝对路径和有界停止超时；只接受自己创建的活动线程。停止失败或退出超时时立即报错，禁止修改本地时钟、历史、日志和四遥数据。
 
-3. Core 停止与重启必须在 SQLite 写事务之外；停止后必须确认 PID 已退出，才能进入清理事务。
+3. Core 停止与重启必须在 SQLite 写事务之外；停止后必须 `join` 并确认旧线程已退出，才能进入清理事务。
 
-4. 清理和新数据应用使用同一个短事务：先把 `data_time_curr=0`、`oper_time_curr=0`，删除 `operator_history`、`operator_log`、`scada_yc_his`、`scada_yx_his`、`scada_yt_his`、`scada_yk_his`；保留 YC/YX/YT/YK 点号和名称，把所有实时四遥的 `value` 与 `time` 归零；随后按原请求位置应用本批 `time > 0` 的 YC/YX，各点 `time` 使用各自响应项时刻，`data_time_curr=response.simu_time`，零时刻占位保持归零且不能导致后续点错位。该清理事务不得修改任何设备的 `soc_curr`；后续 Core 只在本批或后续批次包含有效 SOC YC 时更新 SOC。
+4. 清理和新数据应用使用同一个短事务：先把 `data_time_curr=0`、`oper_time_curr=0`，删除 `operator_history`、`operator_log`、`scada_yc_his`、`scada_yx_his`、`scada_yt_his`、`scada_yk_his`；保留 YC/YX/YT/YK 点号和名称，把所有实时四遥的 `value` 与 `time` 归零；写入 `source_run_seq`、`source_time_start` 和本包计算得到的 `source_runtime_ready`。若首断面已就绪，则按原请求位置应用本批 `time > 0` 的 YC/YX；未就绪时不应用零时刻占位。各点 `time` 使用各自响应项时刻，`data_time_curr=response.simu_time`，零时刻占位保持归零且不能导致后续点错位。该清理事务不得修改任何设备的 `soc_curr`；后续 Core 只在本批或后续批次包含有效 SOC YC 时更新 SOC。
 
 5. `curve_def` 不存在，无曲线配置表需要清理；历史曲线数据已经包含在 `operator_history` 和四张四遥历史表的删除范围内。不得清空设备静态定义。
 
@@ -1011,9 +1034,9 @@ response.simu_time < operator_control.data_time_curr
 
 7. 本批成功交换的 `scada_rtu.refresh_time` 继续使用 Unix 墙钟，绝不能写成回退后的 `simu_time`；RTU 状态在完整恢复成功后为 1。
 
-8. 清理或数据应用失败时，SQLAlchemy 事务必须完整回滚，并尝试恢复 Core；重启失败必须抛出并把连接状态标为中断，不能伪装成功。
+8. 清理或数据应用失败时，SQLAlchemy 事务必须完整回滚；如果 Core 在进入本次恢复前处于可运行状态，必须尝试恢复 Core。首断面尚未就绪时 Core 保持停止，不得因为轮询下一包而重复停止同一代线程。首断面提交后重启失败必须抛出并把连接状态标为中断，不能伪装成功。
 
-9. 响应时刻等于或大于本地时刻时走普通原子更新，不停止 Core、不清历史、不清日志。
+9. 仅当 `run_seq` 未变化且响应时刻等于或大于本地时刻时，才走普通原子更新，不停止 Core、不清历史、不清日志。任务序号变化的优先级高于时刻方向。
 
 #### 9.3 控制命令发送
 
@@ -1298,12 +1321,10 @@ python import_power_definitions.py --source ..\power_system_simulator\power.db -
 ```powershell
 python seed_demo.py --db ems_demo.db
 python simulator_io_mock.py --host 127.0.0.1 --port 9200
-python operator_io.py --db ems_demo.db --mode bridge --simulator-host 127.0.0.1 --simulator-port 9200
-python operator_core.py --db ems_demo.db --poll 0.5
-python operator_mmi.py --db ems_demo.db
+python operator_mmi.py --db ems_demo.db --simulator-host 127.0.0.1 --simulator-port 9200
 ```
 
-README 必须说明：先启动 Mock，再启动 Bridge、内核和 MMI；最后在 MMI 选择控制模式、保存参数并点击“启动 / 继续”。
+README 必须说明：先启动 Mock，再只启动 MMI；MMI 自动按 Core → IO 启动两个子线程，关闭时按 IO → Core 停止并等待。最后在 MMI 选择控制模式、保存参数并点击“启动 / 继续”。
 
 ### 十四、自动化测试要求
 
@@ -1375,9 +1396,9 @@ README 必须说明：先启动 Mock，再启动 Bridge、内核和 MMI；最后
 
 21.1. 成功读取时四遥 `time` 和 `data_time_curr` 使用响应顶层 `simu_time`，而 `scada_rtu.refresh_time` 使用可注入测试的 Unix 墙钟；测试必须证明两种时刻不会互相覆盖。
 
-21.2. 当响应时刻小于本地时刻时，用假的 Core 管理器记录并验证严格顺序：停止动作看到旧数据；重启动作只能看到已提交的新时钟、新 YC/YX 和已清空的历史/日志；YT/YK 仍为零；四个 Bridge 周期/游标状态归零。响应时刻相等或前进时不得停启 Core、不得清历史。
+21.2. 当响应时刻小于本地时刻时，用假的 Core 管理器记录并验证严格顺序：停止动作看到旧数据；重启动作只能看到已提交的新时钟、新 YC/YX 和已清空的历史/日志；YT/YK 仍为零；四个 Bridge 周期/游标状态归零。另用 `run_seq` 变化但新时刻前进的场景验证仍会停止 Core、清理旧任务数据并保存新任务元数据；`runtime_ready=false` 或只有零时刻占位时 Core 保持停止，直到同一 `run_seq` 的首个有效断面提交后才启动。只有任务序号未变化且响应时刻相等或前进时，才不得停启 Core、不得清历史。
 
-21.3. Core 停止失败时运行数据完全不回退；清理/应用异常时事务完整回滚并尝试重启 Core。使用临时进程验证 PID 文件过期处理、目标脚本/数据库归属校验、停止确认、启动参数和工作目录；严禁测试正式数据库或正式 Core。
+21.3. Core 线程停止失败时运行数据完全不回退；清理/应用异常时事务完整回滚并尝试重启 Core。使用临时数据库和受管线程验证停止事件、`join`、有界超时、线程代次、启动/停止顺序以及时钟回退后的 Core 重启；另为显式独立兼容入口保留 PID 文件归属测试。严禁测试正式数据库或正式运行线程。
 
 21.4. 分别对 YC、YX、YT、YK 预置本地点号和点名，再输入同点号但不同 `name` 的报文，验证四张实时表都只改变 `value/time`，本地 `name/pnt_no` 保持不变。再对四种四遥各输入一个未知点号，验证不创建记录、同批已定义点仍成功更新，并为每个未知点写入一条包含正确类型、点号、报文点名、来源和运行时刻的 `LOG_WARNING/unknown_scada_point` 告警。
 
@@ -1464,15 +1485,15 @@ README 必须说明：先启动 Mock，再启动 Bridge、内核和 MMI；最后
 
 目录和正文必须完整包含以下 18 个一级章节，顺序不得遗漏：
 
-1. **手册概览**：说明系统用途、适用对象、三个正式常驻进程、外部模拟器接口、正式库与示例库边界，以及本手册对应的软件版本。
+1. **手册概览**：说明系统用途、适用对象、一个 MMI 宿主进程与两个受管工作线程、外部模拟器接口、正式库与示例库边界，以及本手册对应的软件版本。
 
-2. **快速开始**：给出 Python 版本检查、环境创建、依赖安装、`pyuic6`、正式库初始化、独立示例库、Mock 联调和三个进程的可复制 PowerShell 命令；说明正常启动顺序、停止顺序和首次运行检查点。
+2. **快速开始**：给出 Python 版本检查、环境创建、依赖安装、`pyuic6`、正式库初始化、独立示例库、Mock 联调以及只启动 MMI 的可复制 PowerShell 命令；说明 MMI 自动启动/停止 Core、IO 子线程的顺序和首次运行检查点。
 
-3. **系统架构**：使用内联 SVG 展示外部 `simulator_io`、`operator_io`、共享 `ems.db`、`operator_core` 和 `operator_mmi`，并分别解释量测数据流、控制命令流和数据库访问关系。
+3. **系统架构**：使用内联 SVG 展示外部 `simulator_io`、MMI 宿主、IO/Core 子线程和共享 `ems.db`，并分别解释量测数据流、控制命令流、线程生命周期和数据库访问关系。
 
-4. **进程职责与调度**：说明 Core 的 0.5 秒轮询、数据周期与决策周期的单调墙钟调度、IO 的读取/写入周期、MMI 页面刷新周期，以及逻辑“停止”和操作系统进程退出的区别。
+4. **线程职责与调度**：说明 Core 的 0.5 秒轮询、数据周期与决策周期的单调墙钟调度、IO 的读取/写入周期、MMI 页面刷新周期、子线程自动启停，以及逻辑“停止”和关闭 MMI 进程的区别。
 
-5. **安装、初始化与部署**：说明依赖、目录、数据库初始化/迁移、正式库不得写示例数据、旧 `power.db` 只读导入、配置参数、日志和进程管理。
+5. **安装、初始化与部署**：说明依赖、目录、数据库初始化/迁移、正式库不得写示例数据、旧 `power.db` 只读导入、配置参数、日志、MMI 宿主和子线程生命周期管理。
 
 6. **数据库设计**：逐表列出当前 ORM 的 17 张业务表、主键/复合主键、关键字段、单位、索引、约束和默认值；明确不存在 `curve_def`，历史表时间字段为 `time`，RTU `refresh_time` 是 Unix 墙钟。
 
@@ -1488,7 +1509,7 @@ README 必须说明：先启动 Mock，再启动 Bridge、内核和 MMI；最后
 
 12. **运行日志与历史数据**：说明 `LOG_DECISION` 的触发条件、输入、策略步骤、输出和平衡校验结构；说明历史断面和四遥历史的写入时机、查询方式以及“无自动存储/查询条数上限但必须监控磁盘”的运维要求。
 
-13. **SQLite 多进程并发与可靠性**：说明 WAL、`busy_timeout`、外键、短事务、写重试、事务边界、网络调用期间不持有事务、单写者事实以及为什么单进程全局锁不能解决多进程竞争。
+13. **SQLite 多线程与外部多进程并发可靠性**：说明每个长期工作线程独立 Engine/Session、WAL、`busy_timeout`、外键、短事务、写重试、事务边界、网络调用期间不持有事务和 SQLite 单写者事实。
 
 14. **备份、恢复与数据归档**：给出一致性备份、停机恢复、完整性检查、WAL 文件注意事项、长期历史归档和回滚前备份方法；不得把直接复制一个正在写入的主数据库文件描述为可靠备份。
 
@@ -1504,7 +1525,7 @@ README 必须说明：先启动 Mock，再启动 Bridge、内核和 MMI；最后
 
 - 手册必须以最终生成并验证的代码为准。先检查 ORM、策略、Bridge、入口脚本、UI 和测试，再写手册；禁止照抄本提示词中已经被实际实现调整掉的细节，也禁止把待办事项写成已经具备的能力。
 
-- 明确系统共有 17 张业务表、5 个 MMI 主页面和 3 个正式常驻进程；`simulator_io_mock` 是联调工具，不计入正式常驻进程。不得出现 `curve_def`、`soc_init`、偏航角字段、偏航角设定 YT 或桨距角设定 YT。
+- 明确系统共有 17 张业务表、5 个 MMI 主页面、1 个正式 MMI 宿主进程和 2 个受管工作线程；`simulator_io_mock` 是外部联调工具。不得出现 `curve_def`、`soc_init`、偏航角字段、偏航角设定 YT 或桨距角设定 YT。
 
 - 明确停止切到运行会清空历史、日志及实时四遥的 `value/time`，但不会复位储能 `soc_curr`；暂停再继续不会执行停止到运行的清理。逻辑停止只改变业务状态，不等价于杀死进程。
 
@@ -1578,11 +1599,11 @@ PRAGMA index_list(scada_yc_his);
 
 注意：`busy_timeout` 和连接级外键配置必须通过项目的 SQLAlchemy engine 连接检查，不能只用一个没有安装连接事件的外部 SQLite CLI 连接下结论。
 
-还必须执行一次独立进程联调：
+还必须执行一次独立 MMI 宿主联调：
 
 1. 使用独立 `ems_demo.db`。
 
-2. 分别启动 Mock、Bridge 和内核。
+2. 启动 Mock，再只启动 MMI；证明 MMI 自动按 Core → IO 创建两个子线程，且系统中没有独立 Core/IO 进程。
 
 3. 先设置开环并运行至少一个决策周期，证明设备 `p_set` 已更新且 YT/YK 为 0 条；查询对应 `LOG_DECISION`，证明日志包含实际输入、逐步策略过程、逐设备输出，并明确记录开环未生成 YT/YK。
 
@@ -1590,7 +1611,7 @@ PRAGMA index_list(scada_yc_his);
 
 5. 检查 `data_time_curr`、`oper_time_curr`、RTU `refresh_time`、日志和历史记录均前进，并证明 `refresh_time` 接近当前 Unix 墙钟而不是模拟器运行秒数。
 
-6. 联调结束后，只停止本次启动且 PID 已明确记录的进程，不得误停其他 Python 进程。
+6. 联调结束后正常关闭本次 MMI，证明先停止 IO、再停止 Core 并完成 `join`；只停止 PID 已明确记录的 MMI 宿主，不得误停其他 Python 进程。
 
 Qt 视觉验收至少包括：
 
@@ -1620,36 +1641,36 @@ Qt 视觉验收至少包括：
 
 服务重启前必须建立新的实时基线：
 
-1. 通过完整脚本绝对路径、数据库绝对路径和完整命令行识别本仓库的 `operator_core.py`、`operator_io.py`、`operator_mmi.py`；记录各自旧 PID、可执行文件和参数。不得只按 `python.exe`、模糊名称、父进程或窗口标题结束进程，不得批量杀死其他 Python 服务。
+1. 通过完整脚本绝对路径、数据库绝对路径和完整命令行识别唯一的 `operator_mmi.py` 宿主进程；同时检查并清除旧架构遗留的独立 `operator_core.py`/`operator_io.py`，防止它们与新子线程重复运行。不得只按 `python.exe`、模糊名称、父进程或窗口标题结束进程，不得批量杀死其他 Python 服务。
 
 2. 单独识别外部 `simulator_io.py` 以及 TCP `9001` 监听者，记录操作前的实时 PID 和命令行。外部模拟器可能在不同检查之间自行重启并更换 PID，因此必须以本次停止动作之前的最后一次实时检查为保护基线，不得沿用旧报告中的过期 PID，也不得把外部 PID 自行变化错误归因于本次发布。
 
 3. 除非用户明确要求重启外部模拟器，否则禁止停止、重启或修改外部 `simulator_io`，并禁止抢占其 `9001` 监听端口。重启本项目后必须证明外部基线 PID 仍存活且 `9001` 仍由它监听；若外部服务在发布过程中自行变化，必须重新核对命令行和端口归属并如实报告，不能伪称“未变化”。
 
-本项目进程必须按以下顺序定向重启：
+本项目默认只重启 MMI 宿主进程：
 
 ```text
-停止：operator_io → operator_core → operator_mmi
-启动：operator_core → operator_io → operator_mmi
+停止：关闭 operator_mmi → MMI 内部停止并等待 operator-io → operator-core
+启动：启动 operator_mmi → MMI 内部自动启动 operator-core → operator-io
 ```
 
-- 每个停止动作后必须等待并确认目标 PID 已退出，再处理下一个进程；未运行的角色可以跳过，但必须报告。Core 必须继续使用与目标 `ems.db` 对应的项目 PID 文件，启动后核对 PID 文件中的脚本、数据库和新 PID。IO 必须保持原 Bridge 主机、端口、RTU、轮询周期等有效启动参数。MMI 使用 `pythonw.exe` 或等价无控制台方式启动并保持窗口可见；Core 和 IO 可以隐藏运行。
+- 关闭 MMI 后必须确认宿主 PID 已退出；正常关闭路径必须先停止 IO 线程，再停止 Core 线程并完成有界 `join`。启动时使用 `pythonw.exe` 或等价无控制台方式保持 MMI 窗口可见，并传入数据库、Bridge 主机、端口、RTU 和轮询参数。默认模式不得再启动独立 Core/IO 进程，也不创建 Core 子线程 PID 文件。
 
-- 本次启动的三个进程应使用独立、带时刻或发布标识的 `.runtime` 标准输出/错误日志，便于把历史日志与本次启动错误分开。启动后必须有一个合理的稳定等待窗口，并确认进程没有提前退出；不得把 `Start-Process` 返回 PID 或短暂存活当作完整健康证据。
+- MMI 宿主应使用独立、带时刻或发布标识的 `.runtime` 标准输出/错误日志，并在日志中带线程名，明确记录 Core、IO 子线程的启动、线程标识、停止和异常。启动后必须有合理的稳定等待窗口，不得把 `Start-Process` 返回 PID 或短暂存活当作完整健康证据。
 
 发布后至少完成以下验收：
 
-1. 重新列出三个本项目进程的完整命令行，报告旧 PID → 新 PID；确认 Core、IO、MMI 各只有一个目标实例，并确认 Core PID 文件记录与新 Core PID 一致。
+1. 重新列出唯一 MMI 宿主的完整命令行，报告旧 PID → 新 PID；确认不存在独立 Core/IO 进程。通过线程控制器快照、日志或测试确认 `operator-core`、`operator-io` 两个子线程各一个、均存活且由同一 MMI 生命周期管理。
 
 2. 检查外部模拟器命令行和 `0.0.0.0:9001`/实际配置地址的监听归属，证明没有误停或端口漂移。
 
 3. 使用 SQLAlchemy 项目连接或只读数据库连接检查 `PRAGMA integrity_check=ok`、`journal_mode=wal`、`operator_control` 的运行/开闭环/连接请求/双周期/双时钟以及 `scada_rtu.status`。`scada_rtu.refresh_time` 必须按 Unix 墙钟秒计算新鲜度，不能拿模拟器时刻判断连接健康。
 
-4. 扫描本次 Core、IO、MMI 新日志中的 `Traceback`、`ERROR`、未处理 `Exception` 和致命错误。若 IO 收到回退的模拟器时刻并按规定清理历史/日志、把双时钟归零，必须结合操作前后时刻解释这是时钟回退恢复结果，不能误报为历史上限或随机数据丢失。
+4. 扫描本次 MMI 宿主及 Core/IO 线程日志中的 `Traceback`、`ERROR`、未处理 `Exception` 和致命错误。若 IO 收到回退的模拟器时刻并按规定清理历史/日志、把双时钟归零，必须结合操作前后时刻解释这是时钟回退恢复结果，不能误报为历史上限或随机数据丢失。
 
 5. 在真实 Windows/Qt 环境中按精确标题筛选且只能得到一个“电力系统操作员人机界面”窗口；读取真实控件或截图，确认系统主页、运行状态、控制模式、双时钟和“电网模拟器连接：正常/中断”与数据库及 RTU 状态一致。不得使用其他前台程序、标题近似窗口或旧截图冒充 MMI 验收。
 
-6. 最后再次检查 `git status --short --branch` 和 `git status --porcelain`；如工作区存在用户的预有修改，必须列出并说明它们未被提交。只有提交范围、远端 SHA、三个服务、外部模拟器、TCP、数据库、日志和 MMI 全部得到真实证据后，才能报告发布完成。
+6. 最后再次检查 `git status --short --branch` 和 `git status --porcelain`；如工作区存在用户的预有修改，必须列出并说明它们未被提交。只有提交范围、远端 SHA、MMI 宿主与两个子线程、外部模拟器、TCP、数据库、日志和窗口全部得到真实证据后，才能报告发布完成。
 
 ### 十七、交付质量和禁止事项
 
@@ -1675,7 +1696,7 @@ Qt 视觉验收至少包括：
 
 - 不得让 `operator_io` 连接失败后继续把 RTU 显示为连接成功。
 
-- 不得依赖单进程全局锁解决多进程 SQLite 竞争。
+- 不得依赖一个 Python 全局锁替代 SQLite 事务、WAL 和忙等待；MMI/Core/IO 线程及外部多进程访问都必须遵守数据库并发边界。
 
 - 不得省略储能设备页和储能策略。
 
@@ -1709,7 +1730,7 @@ Qt 视觉验收至少包括：
 
 4. pytest 通过数量。
 
-5. 独立进程开环与闭环联调数据。
+5. 独立 MMI 宿主开环与闭环联调数据，以及 Core/IO 子线程自动启动、时钟回退重启和关闭顺序证据。
 
 6. Qt 主页与历史多曲线渲染结果。
 
@@ -1719,7 +1740,7 @@ Qt 视觉验收至少包括：
 
 9. HTML 技术与用户操作手册的绝对路径、文档/软件版本、字节数、章节数、UTF-8 与锚点检查、6 张真实 MMI 截图的来源/尺寸/PNG 总字节数/图注与 Base64 解码结果、6 组操作步骤、响应式/A4 打印检查、桌面与窄屏真实浏览器渲染结果、控制台错误数量和 SHA-256。
 
-10. 若本次任务包含版本发布和服务重启：显式暂存清单、完整提交 SHA 和提交信息、四方 Git SHA 一致性、三个本项目服务的旧/新 PID 与完整启动参数、Core PID 文件、外部模拟器和 `9001` 端口保护结果、数据库/RTU 墙钟新鲜度、本次启动日志、唯一 MMI 窗口以及最终工作区状态。
+10. 若本次任务包含版本发布和服务重启：显式暂存清单、完整提交 SHA 和提交信息、四方 Git SHA 一致性、MMI 宿主旧/新 PID与完整参数、Core/IO 子线程快照及启动停止顺序、不存在独立 Core/IO 进程的证据、外部模拟器和 `9001` 端口保护结果、数据库/RTU 墙钟新鲜度、本次线程日志、唯一 MMI 窗口以及最终工作区状态。
 
 在所有上述工作完成并验证前，不要把任务标记为完成。
 

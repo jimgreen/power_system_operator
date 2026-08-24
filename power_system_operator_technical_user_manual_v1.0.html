@@ -502,7 +502,7 @@
         <a href="#overview">1. 手册概览</a>
         <a href="#quick-start">2. 快速开始</a>
         <a href="#architecture">3. 系统架构</a>
-        <a href="#processes">4. 进程与调度</a>
+        <a href="#processes">4. 宿主与线程调度</a>
         <a href="#deployment">5. 安装与部署</a>
         <a href="#database">6. 数据库设计</a>
         <a href="#time-model">7. 时间与有效性</a>
@@ -519,8 +519,8 @@
         <a href="#appendix">18. 附录</a>
       </nav>
       <div class="sidebar-foot">
-        基线提交<br>
-        <span class="mono">e0cb1c69ed31fce29787413a75d9bbe8796a9e1a</span><br><br>
+        发布基线<br>
+        <span class="mono">未提交工作树</span><br><br>
         更新日期：2026-08-24
       </div>
     </aside>
@@ -536,12 +536,12 @@
             <span class="badge">PyQt6 MMI</span>
             <span class="badge">JSON Lines TCP</span>
             <span class="badge">新能源优先控制</span>
-            <span class="badge">多进程 WAL</span>
+            <span class="badge">单进程双工作线程</span>
           </div>
           <div class="cover-meta">
             <div><span>文档版本</span><strong>V1.0</strong></div>
             <div><span>软件版本</span><strong>0.1.0</strong></div>
-            <div><span>发布基线</span><strong>e0cb1c6</strong></div>
+            <div><span>发布基线</span><strong>未提交工作树</strong></div>
             <div><span>发布日期</span><strong>2026-08-24</strong></div>
           </div>
         </header>
@@ -550,13 +550,13 @@
           <section class="section" id="overview">
             <span class="section-label">01 · OVERVIEW</span>
             <h2 class="section-title">手册概览</h2>
-            <p class="lead">本系统通过一个共享的 <code>ems.db</code> 连接计算内核、四遥通信进程和 PyQt6 人机界面，对柴油机、风机、光伏、储能和负荷进行运行监视、数据归档和新能源优先控制。</p>
+            <p class="lead">本系统以 PyQt6 MMI 为唯一默认宿主进程，启动时自动创建 Core、IO 两个受管工作线程；三个工作单元通过共享的 <code>ems.db</code> 对柴油机、风机、光伏、储能和负荷进行运行监视、数据归档和新能源优先控制。</p>
 
             <div class="summary-grid">
-              <div class="metric"><span>常驻进程</span><strong>3 个</strong></div>
+              <div class="metric"><span>宿主/工作线程</span><strong>1 + 2</strong></div>
               <div class="metric"><span>业务数据表</span><strong>17 张</strong></div>
               <div class="metric"><span>MMI 主页面</span><strong>5 页</strong></div>
-              <div class="metric"><span>自动化回归</span><strong>98 项</strong></div>
+              <div class="metric"><span>自动化回归</span><strong>102 项</strong></div>
             </div>
 
             <h3>适用读者</h3>
@@ -596,38 +596,32 @@
               <li><strong>创建数据库。</strong>执行 <code>python init_db.py --db ems.db</code>。正式库只创建结构和单例控制行，不自动生成设备或四遥点。</li>
               <li><strong>准备定义。</strong>从现有 <code>power.db</code> 导入定义，或使用单独演示库运行 <code>seed_demo.py</code>。</li>
               <li><strong>启动外部模拟器接口。</strong>真实环境默认连接 <code>127.0.0.1:9001</code>；本地演示可以启动 <code>simulator_io_mock.py</code> 的 9200 端口。</li>
-              <li><strong>启动 Core、IO、MMI。</strong>每个进程使用同一个数据库绝对路径。</li>
+              <li><strong>启动 MMI。</strong>MMI 自动按 Core → IO 启动两个子线程，三个工作单元使用同一个数据库绝对路径。</li>
               <li><strong>在 MMI 保存参数。</strong>选择开环/闭环，配置数据周期和决策周期，点击“保存参数”。</li>
               <li><strong>建立连接并运行。</strong>点击“建立连接”，等待连接状态变为正常，再点击“启动 / 继续”。</li>
             </ol>
 
             <h3>正式环境启动命令</h3>
-            <pre><code># 终端 1：计算内核
-python operator_core.py --db ems.db --poll 0.5
-
-# 终端 2：与电网模拟器通信
-python operator_io.py --db ems.db --mode bridge \
+            <pre><code># 唯一默认宿主；自动启动 Core、IO 子线程
+python operator_mmi.py --db ems.db \
   --simulator-host 127.0.0.1 --simulator-port 9001 \
-  --rtu-id 1 --poll 0.5
-
-# 终端 3：人机界面
-python operator_mmi.py --db ems.db</code></pre>
+  --rtu-id 1 --poll 0.5 --core-poll 0.5</code></pre>
 
             <h3>本地 Mock 联调</h3>
             <pre><code># 终端 0：内存 Mock，不修改正式 ems.db
 python simulator_io_mock.py --host 127.0.0.1 --port 9200
 
-# IO 改连 Mock
-python operator_io.py --db ems_demo.db --mode bridge \
+# MMI 托管的 IO 子线程改连 Mock
+python operator_mmi.py --db ems_demo.db \
   --simulator-host 127.0.0.1 --simulator-port 9200</code></pre>
 
-            <div class="callout warning"><strong>不要混用数据库：</strong>Core、IO 和 MMI 必须传入同一个数据库绝对路径。相对路径在不同工作目录下可能生成多个同名 <code>ems.db</code>，表现为界面、控制和通信数据彼此不一致。</div>
+            <div class="callout warning"><strong>不要重复启动旧入口：</strong>默认模式只启动 MMI，由它把同一数据库绝对路径传给 Core、IO 子线程。不得再并行启动独立 <code>operator_core.py</code>/<code>operator_io.py</code>，否则会形成重复写者。相对路径仍可能在不同工作目录下生成多个同名数据库，正式运行应使用绝对路径。</div>
           </section>
 
           <section class="section" id="architecture">
             <span class="section-label">03 · ARCHITECTURE</span>
             <h2 class="section-title">系统架构</h2>
-            <p>系统采用“外部模拟器接口 + IO Bridge + 共享数据库 + 计算内核 + MMI”的松耦合结构。网络调用不持有 SQLite 写事务，每个进程创建自己的 SQLAlchemy Engine 和 Session。</p>
+            <p>系统采用“外部模拟器接口 + MMI 宿主 + IO/Core 受管子线程 + 共享数据库”的结构。网络调用不持有 SQLite 写事务；MMI、IO、Core 每个长期工作线程创建自己的 SQLAlchemy Engine，并只使用本线程创建的短生命周期 Session。</p>
 
             <div class="architecture no-break" role="img" aria-label="Power System Operator 系统架构图">
               <svg viewBox="0 0 1000 430" xmlns="http://www.w3.org/2000/svg">
@@ -641,8 +635,8 @@ python operator_io.py --db ems_demo.db --mode bridge \
                 <text x="135" y="216" text-anchor="middle" font-size="12" fill="#6c8294">JSON Lines TCP :9001</text>
 
                 <rect x="300" y="130" width="190" height="105" rx="15" fill="#fff3d9" stroke="#d4a24b" stroke-width="2"/>
-                <text x="395" y="167" text-anchor="middle" font-size="18" font-weight="700" fill="#845400">交互进程</text>
-                <text x="395" y="194" text-anchor="middle" font-size="14" fill="#6b5c3b">operator_io</text>
+                <text x="395" y="167" text-anchor="middle" font-size="18" font-weight="700" fill="#845400">IO 子线程</text>
+                <text x="395" y="194" text-anchor="middle" font-size="14" fill="#6b5c3b">operator-io</text>
                 <text x="395" y="216" text-anchor="middle" font-size="12" fill="#7c6c50">YC/YX 拉取 · YT/YK 下发</text>
 
                 <path d="M230 163 L300 163" fill="none" stroke="#4c7696" stroke-width="2.5" marker-end="url(#arrow)"/>
@@ -661,13 +655,13 @@ python operator_io.py --db ems_demo.db --mode bridge \
                 <text x="690" y="227" text-anchor="middle" font-size="12" fill="#4c7774">17 张业务表</text>
 
                 <rect x="585" y="325" width="210" height="72" rx="14" fill="#eef0fb" stroke="#7b88bf" stroke-width="2"/>
-                <text x="690" y="354" text-anchor="middle" font-size="17" font-weight="700" fill="#424e8d">计算内核</text>
-                <text x="690" y="380" text-anchor="middle" font-size="13" fill="#58628c">operator_core · 0.5 s 轮询</text>
+                <text x="690" y="354" text-anchor="middle" font-size="17" font-weight="700" fill="#424e8d">Core 子线程</text>
+                <text x="690" y="380" text-anchor="middle" font-size="13" fill="#58628c">operator-core · 0.5 s 轮询</text>
                 <path d="M690 325 L690 289" fill="none" stroke="#4c7696" stroke-width="2.5" marker-end="url(#arrow)"/>
                 <path d="M720 289 L720 325" fill="none" stroke="#4c7696" stroke-width="2.5" marker-end="url(#arrow)"/>
 
                 <rect x="835" y="130" width="130" height="130" rx="15" fill="#fff0f0" stroke="#ca7373" stroke-width="2"/>
-                <text x="900" y="168" text-anchor="middle" font-size="18" font-weight="700" fill="#8d3434">人机界面</text>
+                <text x="900" y="168" text-anchor="middle" font-size="18" font-weight="700" fill="#8d3434">MMI 宿主进程</text>
                 <text x="900" y="194" text-anchor="middle" font-size="14" fill="#7d5555">operator_mmi</text>
                 <text x="900" y="220" text-anchor="middle" font-size="12" fill="#806565">监视 · 操作</text>
                 <text x="900" y="241" text-anchor="middle" font-size="12" fill="#806565">定义 · 曲线 · 日志</text>
@@ -683,15 +677,15 @@ python operator_io.py --db ems_demo.db --mode bridge \
           </section>
 
           <section class="section" id="processes">
-            <span class="section-label">04 · PROCESSES</span>
-            <h2 class="section-title">进程职责与调度</h2>
+            <span class="section-label">04 · RUNTIME THREADS</span>
+            <h2 class="section-title">宿主进程、线程职责与调度</h2>
             <div class="table-wrap">
               <table>
-                <thead><tr><th>进程</th><th>主要职责</th><th>周期/触发</th><th>关键写入</th></tr></thead>
+                <thead><tr><th>运行单元</th><th>主要职责</th><th>周期/触发</th><th>关键写入</th></tr></thead>
                 <tbody>
-                  <tr><td><code>operator_core.py</code></td><td>读取控制表、刷新设备状态、计算风光理论出力、执行控制策略、保存历史与决策审计。</td><td>每 0.5 秒检查；数据处理由数据时钟前进触发；决策由新数据与 <code>oper_period</code> 同时约束。</td><td>设备实时/设定字段、YT/YK、历史、日志、<code>oper_time_curr</code>。</td></tr>
-                  <tr><td><code>operator_io.py</code></td><td>作为 TCP Client 拉取 YC/YX；每秒检查并发送新的 YT/YK；管理 RTU 连接结果和时钟回退恢复。</td><td>量测按 <code>data_period</code>；控制发送检查周期 1 秒；主循环默认 0.5 秒。</td><td>YC/YX 的 <code>value/time</code>、RTU 状态/墙钟、<code>data_time_curr</code>。</td></tr>
-                  <tr><td><code>operator_mmi.py</code></td><td>操作控制、设备/点表维护、主页曲线、日志查询、历史曲线。</td><td>顶部和主页 1 秒刷新；设备、四遥、日志和历史按 <code>data_period</code> 刷新；切页立即刷新。</td><td>控制表、用户明确保存的设备静态参数和四遥定义。</td></tr>
+                  <tr><td><code>operator-core</code> 子线程</td><td>读取控制表、刷新设备状态、计算风光理论出力、执行控制策略、保存历史与决策审计。</td><td>每 0.5 秒检查；数据处理由数据时钟前进触发；决策由新数据与 <code>oper_period</code> 同时约束。</td><td>设备实时/设定字段、YT/YK、历史、日志、<code>oper_time_curr</code>。</td></tr>
+                  <tr><td><code>operator-io</code> 子线程</td><td>作为 TCP Client 拉取 YC/YX；每秒检查并发送新的 YT/YK；管理 RTU 连接结果和时钟回退恢复。</td><td>量测按 <code>data_period</code>；控制发送检查周期 1 秒；主循环默认 0.5 秒。</td><td>YC/YX 的 <code>value/time</code>、RTU 状态/墙钟、<code>data_time_curr</code>。</td></tr>
+                  <tr><td><code>operator_mmi.py</code> 宿主</td><td>创建并托管两个子线程；提供操作控制、设备/点表维护、主页曲线、日志查询和历史曲线。</td><td>启动时 Core → IO；关闭时 IO → Core；顶部和主页 1 秒刷新，其他页按 <code>data_period</code>。</td><td>控制表、用户明确保存的设备静态参数和四遥定义。</td></tr>
                 </tbody>
               </table>
             </div>
@@ -770,7 +764,7 @@ python -m py_compile operator_mmi_qt.py operator_mmi.py</code></pre>
                   <tr><td><code>dev_solar_gen</code></td><td><code>id</code></td><td><code>name, p_rated, status, p_max_curr, p_curr, p_set</code></td></tr>
                   <tr><td><code>dev_estore</code></td><td><code>id</code></td><td><code>name, status, p_charge_max, p_charge_eff, p_discharge_max, p_discharge_eff, p_curr, p_set, battery_capacity, soc_curr, soc_max, soc_min</code></td></tr>
                   <tr><td><code>dev_load</code></td><td><code>id</code></td><td><code>name, status, p_curr</code></td></tr>
-                  <tr><td rowspan="3">运行信息</td><td><code>operator_control</code></td><td><code>id=1</code></td><td><code>oper_status, control_status, io_connect_enabled, data_period, oper_period, data_time_curr, oper_time_curr</code></td></tr>
+                  <tr><td rowspan="3">运行信息</td><td><code>operator_control</code></td><td><code>id=1</code></td><td><code>oper_status, control_status, io_connect_enabled, data_period, oper_period, data_time_curr, oper_time_curr, source_run_seq, source_time_start, source_runtime_ready</code></td></tr>
                   <tr><td><code>operator_log</code></td><td><code>id</code></td><td><code>log_time, simu_time, log_type, log_info(TEXT)</code></td></tr>
                   <tr><td><code>operator_history</code></td><td><code>simu_time</code></td><td>环境、柴油、风电、光伏、负荷和储能汇总量。</td></tr>
                   <tr><td rowspan="4">四遥历史</td><td><code>scada_yc_his</code></td><td rowspan="4"><code>(time,pnt_no)</code></td><td><code>value(float)</code>，另有 <code>(pnt_no,time)</code> 索引。</td></tr>
@@ -822,7 +816,7 @@ python -m py_compile operator_mmi_qt.py operator_mmi.py</code></pre>
           <section class="section" id="protocol">
             <span class="section-label">08 · PROTOCOL</span>
             <h2 class="section-title">四遥通信协议</h2>
-            <p>默认结构为 <code>operator_io --TCP client--&gt; simulator_io</code>。协议使用 UTF-8 JSON Lines：每次连接发送一行 JSON 请求并读取一行响应。</p>
+            <p>默认结构为 <code>MMI/operator-io 子线程 --TCP client--&gt; simulator_io</code>。协议使用 UTF-8 JSON Lines：每次连接发送一行 JSON 请求并读取一行响应。</p>
 
             <h3>YC/YX 读取请求</h3>
             <pre><code>{
@@ -838,6 +832,10 @@ python -m py_compile operator_mmi_qt.py operator_mmi.py</code></pre>
             <h3>成功响应</h3>
             <pre><code>{
   "ok": true,
+  "run_seq": 7,
+  "simu_status": 1,
+  "simu_time_start": 0,
+  "runtime_ready": true,
   "simu_time": 2,
   "data": {
     "yc": [
@@ -885,17 +883,19 @@ python -m py_compile operator_mmi_qt.py operator_mmi.py</code></pre>
               <li>只有收到 <code>{"ok":true}</code> 后 IO 才推进发送游标；失败时保留命令供下次重试。</li>
             </ul>
 
-            <h3>模拟器时钟回退</h3>
-            <p>当新响应的 <code>simu_time</code> 小于 EMS 已保存的 <code>data_time_curr</code> 时，判定模拟器归零重启。IO 严格执行：</p>
+            <h3>模拟器新任务与时钟回退</h3>
+            <p>新版模拟器成组返回 <code>run_seq</code>、<code>simu_time_start</code>、<code>simu_status</code> 和 <code>runtime_ready</code>。当 <code>run_seq</code> 变化时，无论新时刻前进、相等还是回退，都表示新的权威任务边界；同一任务内 <code>simu_time</code> 小于 EMS 已保存的 <code>data_time_curr</code> 时表示时钟回退。完全不含 <code>run_seq</code> 的旧对端继续使用时钟回退兼容逻辑。IO 严格执行：</p>
             <div class="flow-line">
-              <span class="flow-node">校验并停止 Core</span><span class="flow-arrow">→</span>
+              <span class="flow-node">停止并等待 Core 子线程</span><span class="flow-arrow">→</span>
               <span class="flow-node">时钟归零</span><span class="flow-arrow">→</span>
               <span class="flow-node">清历史/日志/四遥值</span><span class="flow-arrow">→</span>
+              <span class="flow-node">保存任务元数据</span><span class="flow-arrow">→</span>
+              <span class="flow-node">等待首个有效断面</span><span class="flow-arrow">→</span>
               <span class="flow-node">应用新 YC/YX</span><span class="flow-arrow">→</span>
               <span class="flow-node">提交事务</span><span class="flow-arrow">→</span>
-              <span class="flow-node">重启 Core</span>
+              <span class="flow-node">重启 Core 子线程</span>
             </div>
-            <p>储能 <code>soc_curr</code> 在该恢复过程中不复位，后续只由有效 SOC YC 更新。</p>
+            <p>只有 <code>runtime_ready=true</code> 且本包至少含一个正时标、非空值的 YC/YX 时，才认为首个有效断面就绪并恢复 Core；此前 Core 保持停止。储能 <code>soc_curr</code> 在该恢复过程中不复位，后续只由有效 SOC YC 更新。</p>
           </section>
 
           <section class="section" id="strategy">
@@ -1062,7 +1062,7 @@ p_max = calculate_wind_max_power(
             <h3>日常启动</h3>
             <ol class="steps">
               <li>确认电网模拟器的 <code>simulator_io</code> 已监听目标 IP/端口。</li>
-              <li>启动 <code>operator_core</code>、<code>operator_io</code>、<code>operator_mmi</code>。</li>
+              <li>启动 <code>operator_mmi</code>；确认日志显示 <code>operator-core</code>、<code>operator-io</code> 两个子线程已自动启动。</li>
               <li>在顶部确认数据库控制参数，选择开环或闭环。</li>
               <li>点击“建立连接”，等待电网模拟器状态显示“正常”。</li>
               <li>如系统当前为“停止”，先确认历史是否已备份，再点击“启动 / 继续”。</li>
@@ -1080,8 +1080,8 @@ p_max = calculate_wind_max_power(
               <li>再次点击“启动 / 继续”时，Core 清除历史和实时四遥值/时刻后开始新一轮运行。</li>
             </ol>
 
-            <h3>进程维护重启</h3>
-            <p>逻辑“停止”与进程退出不同。仅重启程序进程时，可保持 <code>oper_status</code> 不变，按 IO → Core → MMI 顺序停止旧进程，再按 Core → IO → MMI 顺序启动，并核对完整脚本路径和数据库路径，禁止按所有 <code>python.exe</code> 批量终止。</p>
+            <h3>程序维护重启</h3>
+            <p>逻辑“停止”与关闭 MMI 不同。仅重启程序时可保持 <code>oper_status</code> 不变，正常关闭 MMI；关闭路径会按 IO → Core 停止并等待两个子线程。再次只启动 MMI，它会按 Core → IO 自动恢复。不得同时启动旧的独立 Core/IO 入口，更不能按所有 <code>python.exe</code> 批量终止。</p>
 
             <h3>修改设备参数</h3>
             <ol>
@@ -1107,27 +1107,27 @@ p_max = calculate_wind_max_power(
 
             <h3>历史保留策略</h3>
             <div class="callout warning"><strong>无自动上限：</strong><code>operator_history</code>、<code>operator_log</code> 和四张历史表不设置记录条数、保存时长或查询条数上限。长时间运行会持续增大 <code>ems.db</code>，应监控磁盘并制定归档策略。</div>
-            <p>系统只在两种明确场景清理运行历史：用户停止后再次启动，或 IO 检测到模拟器权威时钟回退并执行完整恢复。普通暂停、网络短时中断或进程重启不会主动清空历史。</p>
+            <p>系统只在两种明确场景清理运行历史：用户停止后再次启动，或 IO 检测到模拟器权威时钟回退并执行完整恢复。普通暂停、网络短时中断或正常重启 MMI/子线程不会主动清空历史。</p>
           </section>
 
           <section class="section" id="reliability">
             <span class="section-label">13 · RELIABILITY</span>
-            <h2 class="section-title">SQLite 多进程并发与可靠性</h2>
+            <h2 class="section-title">SQLite 多线程与外部多进程并发</h2>
             <div class="table-wrap">
               <table>
                 <thead><tr><th>机制</th><th>配置/规则</th><th>目的</th></tr></thead>
                 <tbody>
-                  <tr><td>WAL</td><td><code>PRAGMA journal_mode=WAL</code></td><td>读进程通常不阻塞写进程。</td></tr>
+                  <tr><td>WAL</td><td><code>PRAGMA journal_mode=WAL</code></td><td>读线程/外部读进程通常不阻塞写入。</td></tr>
                   <tr><td>忙等待</td><td><code>busy_timeout=10000 ms</code></td><td>短暂写锁等待最多 10 秒。</td></tr>
                   <tr><td>同步模式</td><td><code>synchronous=NORMAL</code></td><td>在 WAL 下平衡安全性和性能。</td></tr>
                   <tr><td>外键</td><td><code>foreign_keys=ON</code></td><td>启用 SQLite 外键检查。</td></tr>
-                  <tr><td>短事务</td><td>网络调用和进程停启均在事务外</td><td>避免长时间占据单写者锁。</td></tr>
+                  <tr><td>短事务</td><td>网络调用和线程停启均在事务外</td><td>避免长时间占据单写者锁。</td></tr>
                   <tr><td>有限重试</td><td>仅 locked/busy，最多 7 次</td><td>指数退避并加入随机抖动；业务异常不重试。</td></tr>
-                  <tr><td>进程隔离</td><td>每个进程独立 Engine/Session</td><td>不跨进程传递 SQLAlchemy 对象。</td></tr>
+                  <tr><td>工作单元隔离</td><td>MMI、Core、IO 各自独立 Engine</td><td>不跨线程传递 Session；外部进程也独立建 Engine。</td></tr>
                 </tbody>
               </table>
             </div>
-            <div class="callout"><strong>不用 Python 全局锁：</strong>普通 <code>threading.Lock</code> 只能保护一个进程，不能解决 Core、IO、MMI 多进程争用。并发由 SQLite WAL、busy timeout、短事务和有限重试共同处理。</div>
+            <div class="callout"><strong>线程锁不能替代数据库事务：</strong>Core、IO、MMI 虽位于同一进程，但每个长期线程使用独立 Engine/Session；外部模拟器、数据库工具或兼容入口仍可能是其他进程。并发一致性由 SQLite WAL、busy timeout、短事务和有限重试共同保证。</div>
           </section>
 
           <section class="section" id="backup">
@@ -1137,19 +1137,19 @@ p_max = calculate_wind_max_power(
             <h3>推荐备份流程</h3>
             <ol class="steps">
               <li>记录当前运行状态、数据时刻和控制时刻。</li>
-              <li>暂停或停止 IO/Core 写入；关闭可能占用数据库的外部 SQLite 编辑器。</li>
+              <li>暂停运行并正常关闭 MMI，使 IO/Core 子线程停止写入；关闭可能占用数据库的外部 SQLite 编辑器。</li>
               <li>确认没有活动写事务后，复制 <code>ems.db</code> 到带日期时间的备份文件。</li>
               <li>若不能停止写入，应使用 SQLite 官方 Backup API 创建一致快照，不能只复制正在 WAL 写入的主文件。</li>
-              <li>备份后重新启动进程，检查 RTU 状态、数据时钟和 MMI。</li>
+              <li>备份后重新启动 MMI，等待两个子线程自动启动，再检查 RTU 状态和数据时钟。</li>
             </ol>
 
             <h3>恢复流程</h3>
             <ol>
-              <li>停止 IO、Core 和 MMI，并核验目标进程归属。</li>
+              <li>正常关闭 MMI，并确认 IO、Core 子线程已经退出。</li>
               <li>保留当前数据库的故障现场备份。</li>
               <li>用备份替换 <code>ems.db</code>；不要混入不匹配的 <code>-wal/-shm</code> 文件。</li>
               <li>执行 <code>python init_db.py --db ems.db</code> 完成幂等结构检查/迁移。</li>
-              <li>依次启动 Core、IO、MMI，并核对连接、时钟、设备和历史。</li>
+              <li>启动 MMI，由它依次启动 Core、IO 子线程，并核对连接、时钟、设备和历史。</li>
             </ol>
 
             <h3>归档建议</h3>
@@ -1192,7 +1192,7 @@ p_max = calculate_wind_max_power(
             <pre><code>$env:QT_QPA_PLATFORM = 'offscreen'
 python -m pytest -q
 python -m compileall -q .</code></pre>
-            <p>当前发布基线验证结果：<strong>98 passed</strong>。测试覆盖数据库结构/迁移、定义导入、并发写、策略边界、时钟回退、四遥协议、未知点告警、决策审计、MMI 页面、编辑保护、曲线游标和三位小数显示。</p>
+            <p>当前未提交工作树验证结果：<strong>102 passed</strong>。测试范围包括数据库结构/迁移、定义导入、并发写、策略边界、时钟回退、四遥协议、未知点告警、决策审计、MMI 自动托管线程、编辑保护、曲线游标和三位小数显示。</p>
 
             <h3>版本信息</h3>
             <div class="table-wrap">
@@ -1202,7 +1202,7 @@ python -m compileall -q .</code></pre>
                   <tr><td>软件包版本</td><td><code>0.1.0</code></td></tr>
                   <tr><td>文档版本</td><td><code>V1.0</code></td></tr>
                   <tr><td>Git 分支</td><td><code>main</code></td></tr>
-                  <tr><td>发布提交</td><td><code>e0cb1c69ed31fce29787413a75d9bbe8796a9e1a</code></td></tr>
+                  <tr><td>发布提交</td><td><code>未提交工作树</code></td></tr>
                   <tr><td>远端</td><td><code>git@github.com:jimgreen/power_system_operator.git</code></td></tr>
                   <tr><td>发布日期</td><td>2026-08-24</td></tr>
                 </tbody>
@@ -1215,7 +1215,7 @@ python -m compileall -q .</code></pre>
               <li>协议、数据库和控制策略变更必须增加或更新自动化测试。</li>
               <li>提交前运行测试、编译和 <code>git diff --check</code>。</li>
               <li>不要提交 <code>ems.db</code>、备份、运行日志、PID、缓存或密钥。</li>
-              <li>发布后核对本地 HEAD、上游分支和实时远端 HEAD，并重新验证运行进程。</li>
+              <li>发布后核对本地 HEAD、上游分支和实时远端 HEAD，并重新验证 MMI 宿主及两个子线程。</li>
             </ul>
           </section>
 
@@ -1227,7 +1227,7 @@ python -m compileall -q .</code></pre>
               <li>SQLite 数据库文件包含设备定义、控制命令、运行历史和日志，应限制操作系统文件权限并纳入备份管理。</li>
               <li>Core/IO 运行期只能修改已定义四遥点的 <code>value/time</code>；点号和点名的变更属于显式维护操作。</li>
               <li>未知点不会自动建点；这是防止错误报文污染点表和控制对象身份的安全边界。</li>
-              <li>Core 进程管理使用 PID 文件、绝对脚本路径和绝对数据库路径交叉校验，禁止仅凭进程名终止 Python。</li>
+              <li>默认 Core/IO 只能由 MMI 持有的线程控制器停启，控制器只管理自己创建的线程；独立兼容入口不得与 MMI 托管模式同时运行。</li>
               <li>闭环会真实产生并发送控制命令。首次接入新模拟器或现场设备时，应先开环验证点表、量纲、符号和策略结果。</li>
             </ul>
           </section>
@@ -1259,7 +1259,8 @@ dev_load.1.p_curr</code></pre>
 
             <h3>C. 上线验收清单</h3>
             <ul class="checklist">
-              <li>Core、IO、MMI 使用同一绝对数据库路径。</li>
+              <li>只启动一个 MMI 宿主；Core、IO 子线程自动启动且不存在独立重复进程。</li>
+              <li>MMI、Core、IO 各自使用独立 Engine，但指向同一绝对数据库路径。</li>
               <li>数据库 WAL、busy timeout 和外键已启用。</li>
               <li>设备和四遥定义数量与源系统核对一致。</li>
               <li>YC/YX 包级时钟和点内时钟语义正确。</li>
@@ -1276,7 +1277,7 @@ dev_load.1.p_curr</code></pre>
             </ul>
 
             <div class="footer-note">
-              <strong>文档基线声明：</strong>本手册依据 Power System Operator 软件包 0.1.0、Git 提交 <span class="mono">e0cb1c69ed31fce29787413a75d9bbe8796a9e1a</span> 编制。后续数据库、协议、策略或 MMI 行为发生变化时，应同步更新文档版本和发布基线。
+              <strong>文档基线声明：</strong>本手册依据 Power System Operator 软件包 0.1.0 的“单一 MMI 宿主 + Core/IO 两个受管子线程”未提交工作树编制。形成发布提交后应把本处和版本表更新为真实 Git SHA；后续数据库、协议、策略或 MMI 行为发生变化时也必须同步更新。
             </div>
           </section>
         </div>

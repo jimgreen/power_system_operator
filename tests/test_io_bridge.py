@@ -55,6 +55,98 @@ class RecordingCoreManager:
         self.events.append(("start", self._snapshot()))
 
 
+def test_new_run_sequence_clears_forward_clock_history_and_waits_until_ready(tmp_path):
+    database = Database(tmp_path / "ems.db")
+    initialize_database(database)
+
+    def seed(session):
+        control = session.get(OperatorControl, 1)
+        control.oper_status = OPER_RUNNING
+        control.data_time_curr = 60
+        control.oper_time_curr = 60
+        control.source_run_seq = 1
+        control.source_time_start = 0
+        control.source_runtime_ready = 1
+        session.add_all(
+            [
+                ScadaYc(pnt_no=1, name="环境.当前风速", value=15.0, time=60),
+                ScadaYx(pnt_no=2, name="风机.运行状态", value=1, time=60),
+                OperatorHistory(simu_time=60, wind_speed=15.0),
+                OperatorLog(log_time=1, simu_time=60, log_type=1, log_info="旧任务"),
+                ScadaYcHis(time=60, pnt_no=1, value=15.0),
+                ScadaYxHis(time=60, pnt_no=2, value=1),
+            ]
+        )
+
+    database.write(seed)
+    responses = iter(
+        [
+            {
+                "ok": True,
+                "run_seq": 2,
+                "simu_status": 0,
+                "simu_time_start": 28800,
+                "runtime_ready": False,
+                "simu_time": 28800,
+                "data": {
+                    "yc": [{"value": 0.0, "time": 0}],
+                    "yx": [{"value": 0, "time": 0}],
+                },
+            },
+            {
+                "ok": True,
+                "run_seq": 2,
+                "simu_status": 1,
+                "simu_time_start": 28800,
+                "runtime_ready": True,
+                "simu_time": 28860,
+                "data": {
+                    "yc": [{"value": 16.0, "time": 28860}],
+                    "yx": [{"value": 1, "time": 28860}],
+                },
+            },
+        ]
+    )
+    manager = RecordingCoreManager(database)
+    bridge = OperatorIoBridge(
+        database,
+        transport=lambda _request: next(responses),
+        core_process_manager=manager,
+    )
+
+    assert bridge._pull_measurements(60, 1) is True
+    assert [event[0] for event in manager.events] == ["stop"]
+    with database.session() as session:
+        control = session.get(OperatorControl, 1)
+        assert (
+            control.source_run_seq,
+            control.source_time_start,
+            control.source_runtime_ready,
+            control.data_time_curr,
+            control.oper_time_curr,
+        ) == (2, 28800, 0, 28800, 0)
+        assert session.scalar(select(func.count()).select_from(OperatorHistory)) == 0
+        assert session.scalar(select(func.count()).select_from(OperatorLog)) == 0
+        assert (session.get(ScadaYc, 1).value, session.get(ScadaYc, 1).time) == (
+            0.0,
+            0,
+        )
+
+    assert bridge._pull_measurements(28800, 1) is True
+    assert [event[0] for event in manager.events] == ["stop", "start"]
+    with database.session() as session:
+        control = session.get(OperatorControl, 1)
+        assert (
+            control.source_run_seq,
+            control.source_runtime_ready,
+            control.data_time_curr,
+        ) == (2, 1, 28860)
+        assert (session.get(ScadaYc, 1).value, session.get(ScadaYc, 1).time) == (
+            16.0,
+            28860,
+        )
+
+
 def test_bridge_pulls_measurements_on_data_period_and_pushes_changed_commands_each_second(tmp_path):
     wall_time = 1_787_422_688
     database = Database(tmp_path / "ems.db")

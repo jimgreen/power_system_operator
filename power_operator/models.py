@@ -173,6 +173,12 @@ class OperatorControl(Base):
     oper_period: Mapped[int] = mapped_column(Integer, default=1)
     data_time_curr: Mapped[int] = mapped_column(Integer, default=0)
     oper_time_curr: Mapped[int] = mapped_column(Integer, default=0)
+    # Identity/readiness of the authoritative simulator task currently mirrored
+    # into this database.  A changed sequence is a task boundary even when the
+    # new simulation time moves forward or stays equal.
+    source_run_seq: Mapped[int] = mapped_column(Integer, default=0)
+    source_time_start: Mapped[int] = mapped_column(Integer, default=0)
+    source_runtime_ready: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class ScadaYcHis(Base):

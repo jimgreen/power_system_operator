@@ -53,6 +53,9 @@ def test_initialize_database_builds_required_schema(tmp_path):
         "oper_period",
         "data_time_curr",
         "oper_time_curr",
+        "source_run_seq",
+        "source_time_start",
+        "source_runtime_ready",
     } <= control_columns
     history_columns = {
         column["name"] for column in inspect(db.engine).get_columns("scada_yc_his")
@@ -185,6 +188,9 @@ def test_initialize_database_migrates_legacy_control_and_history_schema(tmp_path
         "oper_period",
         "data_time_curr",
         "oper_time_curr",
+        "source_run_seq",
+        "source_time_start",
+        "source_runtime_ready",
     ]
     with database.engine.connect() as sql:
         row = sql.execute(
