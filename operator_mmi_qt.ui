@@ -42,27 +42,28 @@
          <item row="0" column="7"><widget class="QLabel" name="operTimeValue"><property name="minimumSize"><size><width>105</width><height>0</height></size></property><property name="text"><string>00:00:00</string></property></widget></item>
          <item row="1" column="0"><widget class="QLabel" name="labelDataPeriod"><property name="text"><string>数据周期（秒）</string></property></widget></item>
          <item row="1" column="1"><widget class="QSpinBox" name="dataPeriodSpin"><property name="minimum"><number>1</number></property><property name="maximum"><number>86400</number></property><property name="value"><number>1</number></property></widget></item>
-         <item row="1" column="2"><widget class="QLabel" name="labelOperPeriod"><property name="text"><string>决策周期（墙钟秒）</string></property></widget></item>
+          <item row="1" column="2"><widget class="QLabel" name="labelOperPeriod"><property name="minimumSize"><size><width>118</width><height>0</height></size></property><property name="text"><string>决策周期（墙钟秒）</string></property></widget></item>
          <item row="1" column="3"><widget class="QSpinBox" name="operPeriodSpin"><property name="minimum"><number>1</number></property><property name="maximum"><number>86400</number></property><property name="value"><number>1</number></property></widget></item>
          <item row="1" column="4" colspan="4"><widget class="QLabel" name="controlHintLabel"><property name="text"><string>内核每 0.5 秒检查运行状态；决策按墙钟周期执行；闭环回写遥调与遥控</string></property></widget></item>
        </layout>
       </item>
-       <item><spacer name="controlSpacerLeft"><property name="orientation"><enum>Qt::Orientation::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>30</width><height>20</height></size></property></spacer></item>
+        <item><spacer name="controlSpacerLeft"><property name="orientation"><enum>Qt::Orientation::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>8</width><height>20</height></size></property></spacer></item>
        <item>
         <layout class="QGridLayout" name="controlButtonLayout">
          <property name="horizontalSpacing"><number>8</number></property><property name="verticalSpacing"><number>7</number></property>
-         <item row="0" column="0"><widget class="QPushButton" name="saveControlButton"><property name="text"><string>保存参数</string></property></widget></item>
-         <item row="0" column="1"><widget class="QPushButton" name="startButton"><property name="text"><string>启动 / 继续</string></property></widget></item>
-         <item row="1" column="0"><widget class="QPushButton" name="pauseButton"><property name="text"><string>暂停</string></property></widget></item>
-         <item row="1" column="1"><widget class="QPushButton" name="stopButton"><property name="text"><string>停止</string></property></widget></item>
+          <item row="0" column="0"><widget class="QPushButton" name="saveControlButton"><property name="enabled"><bool>false</bool></property><property name="text"><string>保存参数</string></property></widget></item>
+          <item row="0" column="1"><widget class="QPushButton" name="refreshControlButton"><property name="text"><string>手动刷新参数</string></property></widget></item>
+          <item row="1" column="0"><widget class="QPushButton" name="startButton"><property name="text"><string>启动 / 继续</string></property></widget></item>
+          <item row="1" column="1"><widget class="QPushButton" name="pauseButton"><property name="text"><string>暂停</string></property></widget></item>
+          <item row="1" column="2"><widget class="QPushButton" name="stopButton"><property name="text"><string>停止</string></property></widget></item>
         </layout>
        </item>
-       <item><spacer name="controlSpacerRight"><property name="orientation"><enum>Qt::Orientation::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>18</width><height>20</height></size></property></spacer></item>
+        <item><spacer name="controlSpacerRight"><property name="orientation"><enum>Qt::Orientation::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>8</width><height>20</height></size></property></spacer></item>
        <item>
         <widget class="QFrame" name="simulatorConnectionFrame">
          <property name="sizePolicy"><sizepolicy hsizetype="Preferred" vsizetype="Fixed"><horstretch>0</horstretch><verstretch>0</verstretch></sizepolicy></property>
-         <property name="minimumSize"><size><width>210</width><height>44</height></size></property>
-         <property name="maximumSize"><size><width>280</width><height>48</height></size></property>
+          <property name="minimumSize"><size><width>190</width><height>44</height></size></property>
+          <property name="maximumSize"><size><width>240</width><height>48</height></size></property>
          <property name="frameShape"><enum>QFrame::Shape::StyledPanel</enum></property>
          <layout class="QHBoxLayout" name="simulatorConnectionLayout">
           <property name="leftMargin"><number>10</number></property><property name="topMargin"><number>6</number></property><property name="rightMargin"><number>10</number></property><property name="bottomMargin"><number>6</number></property><property name="spacing"><number>10</number></property>
@@ -74,8 +75,8 @@
        <item>
         <layout class="QHBoxLayout" name="simulatorConnectionButtonLayout">
          <property name="spacing"><number>6</number></property>
-         <item><widget class="QPushButton" name="connectSimulatorButton"><property name="minimumSize"><size><width>82</width><height>0</height></size></property><property name="text"><string>建立连接</string></property></widget></item>
-         <item><widget class="QPushButton" name="disconnectSimulatorButton"><property name="minimumSize"><size><width>82</width><height>0</height></size></property><property name="text"><string>中断连接</string></property></widget></item>
+          <item><widget class="QPushButton" name="connectSimulatorButton"><property name="minimumSize"><size><width>72</width><height>0</height></size></property><property name="text"><string>建立连接</string></property></widget></item>
+          <item><widget class="QPushButton" name="disconnectSimulatorButton"><property name="minimumSize"><size><width>72</width><height>0</height></size></property><property name="text"><string>中断连接</string></property></widget></item>
         </layout>
        </item>
       </layout>
@@ -141,8 +142,14 @@
              <property name="wordWrap"><bool>true</bool></property>
             </widget>
            </item>
-           <item>
-            <widget class="QPushButton" name="saveDevicesButton">
+            <item>
+             <widget class="QPushButton" name="refreshDevicesButton">
+              <property name="minimumSize"><size><width>128</width><height>0</height></size></property>
+              <property name="text"><string>手动刷新参数</string></property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="saveDevicesButton">
              <property name="minimumSize"><size><width>128</width><height>0</height></size></property>
              <property name="enabled"><bool>false</bool></property>
              <property name="text"><string>保存设备修改</string></property>
@@ -186,7 +193,13 @@
           <widget class="QWidget" name="ykPage"><attribute name="title"><string>遥控 YK</string></attribute><layout class="QVBoxLayout" name="ykLayout"><item><widget class="QTableWidget" name="ykTable"><property name="alternatingRowColors"><bool>true</bool></property></widget></item></layout></widget>
          </widget>
         </item>
-        <item><widget class="QPushButton" name="saveScadaButton"><property name="text"><string>保存 RTU / 四遥修改</string></property></widget></item>
+         <item>
+          <layout class="QHBoxLayout" name="scadaParameterButtonLayout">
+           <item><spacer name="scadaParameterButtonSpacer"><property name="orientation"><enum>Qt::Orientation::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+           <item><widget class="QPushButton" name="refreshScadaButton"><property name="minimumSize"><size><width>128</width><height>0</height></size></property><property name="text"><string>手动刷新参数</string></property></widget></item>
+           <item><widget class="QPushButton" name="saveScadaButton"><property name="enabled"><bool>false</bool></property><property name="minimumSize"><size><width>160</width><height>0</height></size></property><property name="text"><string>保存 RTU / 四遥修改</string></property></widget></item>
+          </layout>
+         </item>
        </layout>
       </widget>
       <widget class="QWidget" name="logPage">
@@ -231,6 +244,33 @@
               <property name="selectionBehavior"><enum>QAbstractItemView::SelectionBehavior::SelectRows</enum></property>
               <property name="selectionMode"><enum>QAbstractItemView::SelectionMode::SingleSelection</enum></property>
              </widget>
+            </item>
+            <item>
+             <layout class="QHBoxLayout" name="logPaginationLayout">
+              <property name="spacing"><number>8</number></property>
+              <item><widget class="QLabel" name="logTotalLabel"><property name="text"><string>共 0 条</string></property></widget></item>
+              <item>
+               <spacer name="logPaginationSpacer">
+                <property name="orientation"><enum>Qt::Orientation::Horizontal</enum></property>
+                <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+               </spacer>
+              </item>
+              <item><widget class="QLabel" name="logPageSizeLabel"><property name="text"><string>每页</string></property></widget></item>
+              <item>
+               <widget class="QComboBox" name="logPageSizeCombo">
+                <property name="maximumSize"><size><width>80</width><height>16777215</height></size></property>
+                <property name="currentIndex"><number>1</number></property>
+                <item><property name="text"><string>50</string></property></item>
+                <item><property name="text"><string>100</string></property></item>
+                <item><property name="text"><string>200</string></property></item>
+                <item><property name="text"><string>500</string></property></item>
+               </widget>
+              </item>
+              <item><widget class="QLabel" name="logPageSizeUnitLabel"><property name="text"><string>条</string></property></widget></item>
+              <item><widget class="QPushButton" name="logPreviousPageButton"><property name="text"><string>上一页</string></property></widget></item>
+              <item><widget class="QLabel" name="logPageInfoLabel"><property name="minimumSize"><size><width>90</width><height>0</height></size></property><property name="alignment"><set>Qt::AlignmentFlag::AlignCenter</set></property><property name="text"><string>第 1 / 1 页</string></property></widget></item>
+              <item><widget class="QPushButton" name="logNextPageButton"><property name="text"><string>下一页</string></property></widget></item>
+             </layout>
             </item>
            </layout>
           </widget>

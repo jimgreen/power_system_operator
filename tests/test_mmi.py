@@ -10,9 +10,11 @@ from PyQt6.QtWidgets import (
     QApplication,
     QAbstractItemView,
     QHeaderView,
+    QMessageBox,
     QTableWidget,
     QTreeWidget,
 )
+from sqlalchemy import event
 
 from power_operator.core import CONTROL_CLOSED
 from power_operator.database import Database, initialize_database
@@ -500,6 +502,178 @@ def test_float_displays_use_three_decimals_and_auto_refresh_preserves_edits(
         window.close()
 
 
+def test_control_parameter_edits_are_highlighted_and_survive_auto_refresh(
+    tmp_path,
+    monkeypatch,
+):
+    application = QApplication.instance() or QApplication([])
+    database = Database(tmp_path / "ems.db")
+    initialize_database(database)
+
+    def seed(session):
+        control = session.get(OperatorControl, 1)
+        control.control_status = 1
+        control.data_period = 3
+        control.oper_period = 15
+        control.data_time_curr = 10
+        control.oper_time_curr = 5
+
+    database.write(seed)
+    window = OperatorMainWindow(database)
+    try:
+        assert not window.ui.saveControlButton.isEnabled()
+        assert window.ui.refreshControlButton.text() == "手动刷新参数"
+
+        window.ui.controlModeCombo.setCurrentIndex(0)
+        window.ui.dataPeriodSpin.setValue(7)
+        window.ui.operPeriodSpin.setValue(21)
+        application.processEvents()
+
+        for widget in (
+            window.ui.controlModeCombo,
+            window.ui.dataPeriodSpin,
+            window.ui.operPeriodSpin,
+        ):
+            assert widget.property("modified") is True
+            assert widget in window._dirty_control_widgets
+        assert window.ui.saveControlButton.isEnabled()
+
+        def update_database(session):
+            control = session.get(OperatorControl, 1)
+            control.control_status = 1
+            control.data_period = 9
+            control.oper_period = 23
+            control.data_time_curr = 30
+            control.oper_time_curr = 25
+
+        database.write(update_database)
+        window.refresh_live_data()
+
+        assert window.ui.controlModeCombo.currentIndex() == 0
+        assert window.ui.dataPeriodSpin.value() == 7
+        assert window.ui.operPeriodSpin.value() == 21
+        assert window.ui.dataTimeValue.text() == "00:00:30"
+        assert window.ui.operTimeValue.text() == "00:00:25"
+        assert window.periodic_page_timer.interval() == 9000
+
+        # A runtime status action must not silently save pending parameters.
+        window.set_control_status(1)
+        with database.session() as session:
+            control = session.get(OperatorControl, 1)
+            assert control.oper_status == 1
+            assert control.control_status == 1
+            assert control.data_period == 9
+            assert control.oper_period == 23
+
+        monkeypatch.setattr(
+            QMessageBox,
+            "question",
+            lambda *_args, **_kwargs: QMessageBox.StandardButton.Yes,
+        )
+        window.ui.refreshControlButton.click()
+        application.processEvents()
+
+        assert window.ui.controlModeCombo.currentIndex() == 1
+        assert window.ui.dataPeriodSpin.value() == 9
+        assert window.ui.operPeriodSpin.value() == 23
+        assert not window.ui.saveControlButton.isEnabled()
+        assert not window._dirty_control_widgets
+        assert all(
+            widget.property("modified") is not True
+            for widget in (
+                window.ui.controlModeCombo,
+                window.ui.dataPeriodSpin,
+                window.ui.operPeriodSpin,
+            )
+        )
+    finally:
+        window.close()
+
+
+def test_parameter_tables_show_pending_colors_and_only_manual_refresh_discards(
+    tmp_path,
+    monkeypatch,
+):
+    application = QApplication.instance() or QApplication([])
+    database = Database(tmp_path / "ems.db")
+    initialize_database(database)
+    database.write(
+        lambda session: session.add_all(
+            [
+                DevWindGen(
+                    id=1,
+                    name="W1",
+                    p_rated=100.0,
+                    wind_in=3.0,
+                    wind_rated=12.0,
+                    wind_cut=25.0,
+                ),
+                ScadaYc(pnt_no=1, name="环境.当前风速", value=8.0, time=1),
+            ]
+        )
+    )
+    window = OperatorMainWindow(database)
+
+    def column_index(table, field_name):
+        return next(
+            index
+            for index in range(table.columnCount())
+            if table.horizontalHeaderItem(index).text() == field_name
+        )
+
+    try:
+        wind_table = window.ui.windTable
+        rated_column = column_index(wind_table, "p_rated")
+        rated_item = wind_table.item(0, rated_column)
+        baseline_color = rated_item.background().color().name()
+        rated_item.setText("222.222")
+
+        yc_table = window.ui.ycTable
+        name_column = column_index(yc_table, "name")
+        name_item = yc_table.item(0, name_column)
+        name_item.setText("环境.人工修改风速")
+        application.processEvents()
+
+        assert wind_table.property("modified") is True
+        assert yc_table.property("modified") is True
+        assert rated_item.background().color().name() != baseline_color
+        assert name_item.background().color().name() == "#ffe0a3"
+        assert "未保存修改" in rated_item.toolTip()
+        assert "未保存修改" in name_item.toolTip()
+        assert window.ui.saveDevicesButton.isEnabled()
+        assert window.ui.saveScadaButton.isEnabled()
+
+        def update_database(session):
+            session.get(DevWindGen, 1).p_rated = 77.7777
+            session.get(ScadaYc, 1).name = "环境.数据库风速"
+
+        database.write(update_database)
+        window.ui.mainTabs.setCurrentWidget(window.ui.devicePage)
+        window.refresh_periodic_page()
+        assert wind_table.item(0, rated_column).text() == "222.222"
+        window.ui.mainTabs.setCurrentWidget(window.ui.scadaPage)
+        window.refresh_periodic_page()
+        assert yc_table.item(0, name_column).text() == "环境.人工修改风速"
+
+        monkeypatch.setattr(
+            QMessageBox,
+            "question",
+            lambda *_args, **_kwargs: QMessageBox.StandardButton.Yes,
+        )
+        window.ui.refreshDevicesButton.click()
+        window.ui.refreshScadaButton.click()
+        application.processEvents()
+
+        assert wind_table.item(0, rated_column).text() == "77.778"
+        assert yc_table.item(0, name_column).text() == "环境.数据库风速"
+        assert wind_table.property("modified") is not True
+        assert yc_table.property("modified") is not True
+        assert not window.ui.saveDevicesButton.isEnabled()
+        assert not window.ui.saveScadaButton.isEnabled()
+    finally:
+        window.close()
+
+
 def test_device_parameters_are_editable_and_saved_without_overwriting_live_fields(
     tmp_path,
 ):
@@ -851,7 +1025,7 @@ def test_log_page_falls_back_to_plain_text_for_legacy_non_json(tmp_path):
         window.close()
 
 
-def test_all_history_and_logs_are_queried_without_row_limit(tmp_path):
+def test_history_has_no_data_limit_and_logs_use_database_pagination(tmp_path):
     application = QApplication.instance() or QApplication([])
     database = Database(tmp_path / "ems.db")
     initialize_database(database)
@@ -891,6 +1065,20 @@ def test_all_history_and_logs_are_queried_without_row_limit(tmp_path):
         )
 
     database.write(seed)
+    log_queries: list[str] = []
+
+    def capture_log_queries(
+        _connection,
+        _cursor,
+        statement,
+        _parameters,
+        _context,
+        _executemany,
+    ):
+        if "operator_log" in statement.lower():
+            log_queries.append(statement)
+
+    event.listen(database.engine, "before_cursor_execute", capture_log_queries)
     window = OperatorMainWindow(database)
     try:
         assert window.home_plot.series
@@ -899,7 +1087,58 @@ def test_all_history_and_logs_are_queried_without_row_limit(tmp_path):
         )
         assert window.home_plot.series[0].points[0][0] == 1.0
         assert window.home_plot.series[0].points[-1][0] == float(row_count)
-        assert window.ui.logTable.rowCount() == row_count
+        assert window.log_page_size == 100
+        assert window.log_page == 1
+        assert window.log_total_count == row_count
+        assert window.log_total_pages == 13
+        assert window.ui.logTable.rowCount() == 100
+        assert window.ui.logTotalLabel.text() == f"共 {row_count} 条"
+        assert window.ui.logPageInfoLabel.text() == "第 1 / 13 页"
+        assert not window.ui.logPreviousPageButton.isEnabled()
+        assert window.ui.logNextPageButton.isEnabled()
+        assert "history-log-1205" in window.ui.logTable.item(0, 4).text()
+        assert any(
+            " limit " in f" {statement.lower()} "
+            and " offset " in f" {statement.lower()} "
+            for statement in log_queries
+        )
+
+        window.ui.logNextPageButton.click()
+        application.processEvents()
+        assert window.log_page == 2
+        assert window.ui.logTable.rowCount() == 100
+        assert window.ui.logPageInfoLabel.text() == "第 2 / 13 页"
+        assert "history-log-1105" in window.ui.logTable.item(0, 4).text()
+
+        window.ui.logPreviousPageButton.click()
+        application.processEvents()
+        assert window.log_page == 1
+        selected_id = window.ui.logTable.item(99, 0).data(Qt.ItemDataRole.UserRole)
+        window.ui.logTable.setCurrentCell(99, 0)
+        database.write(
+            lambda session: session.add(
+                OperatorLog(
+                    log_time=row_count + 1,
+                    simu_time=row_count + 1,
+                    log_type=1,
+                    log_info=f"history-log-{row_count + 1}",
+                )
+            )
+        )
+        window.refresh_logs()
+        current = window.ui.logTable.item(window.ui.logTable.currentRow(), 0)
+        assert window.log_page == 2
+        assert window.ui.logTable.currentRow() == 0
+        assert current.data(Qt.ItemDataRole.UserRole) == selected_id
+
+        window.ui.logPageSizeCombo.setCurrentText("500")
+        application.processEvents()
+        assert window.log_page_size == 500
+        assert window.log_page == 1
+        assert window.log_total_count == row_count + 1
+        assert window.log_total_pages == 3
+        assert window.ui.logTable.rowCount() == 500
+        assert window.ui.logPageInfoLabel.text() == "第 1 / 3 页"
 
         window.ui.mainTabs.setCurrentWidget(window.ui.historyPage)
         yc_point = window.ui.historyTree.topLevelItem(0).child(0)
@@ -916,6 +1155,7 @@ def test_all_history_and_logs_are_queried_without_row_limit(tmp_path):
         with database.session() as session:
             assert session.query(OperatorHistory).count() == row_count
             assert session.query(ScadaYcHis).count() == row_count
-            assert session.query(OperatorLog).count() == row_count
+            assert session.query(OperatorLog).count() == row_count + 1
     finally:
         window.close()
+        event.remove(database.engine, "before_cursor_execute", capture_log_queries)

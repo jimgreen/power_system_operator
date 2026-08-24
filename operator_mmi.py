@@ -26,7 +26,7 @@ from PyQt6.QtWidgets import (
     QTreeWidgetItem,
     QVBoxLayout,
 )
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from power_operator.core import (
@@ -62,6 +62,7 @@ from power_operator.models import (
 )
 from power_operator.plot_widget import CurveSeries, InteractivePlot
 from power_operator.runtime_threads import OperatorRuntimeThreads
+from power_operator.single_instance import SingleInstanceGuard
 from power_operator.time_utils import (
     format_float,
     format_simu_time,
@@ -155,6 +156,8 @@ HOME_CURVES = (
     HomeCurveDef(15, "负荷", "负荷总功率 (kW)", "operator_history", "load_power_curr_sum", None, "#eb5757", visible=1),
 )
 
+MODIFIED_ITEM_COLOR = "#ffe0a3"
+
 
 @dataclass(frozen=True)
 class EditorSpec:
@@ -175,6 +178,7 @@ class OperatorMainWindow(QMainWindow):
         self.current_value_edits: dict[str, QLineEdit] = {}
         self.current_value_cards: dict[str, QFrame] = {}
         self._home_curve_tree_signature: tuple[tuple[Any, ...], ...] = ()
+        self._dirty_control_widgets: set[Any] = set()
         self._dirty_editor_tables: set[QTableWidget] = set()
         self.history_start_seconds = 0
         self.history_end_seconds: int | None = None
@@ -182,6 +186,10 @@ class OperatorMainWindow(QMainWindow):
         self.log_start_seconds = 0
         self.log_end_seconds: int | None = None
         self.log_keyword = ""
+        self.log_page_size = 100
+        self.log_page = 1
+        self.log_total_count = 0
+        self.log_total_pages = 1
         application = QApplication.instance()
         if application is not None:
             installed = set(QFontDatabase.families())
@@ -280,8 +288,25 @@ class OperatorMainWindow(QMainWindow):
         self.ui.pauseButton.clicked.connect(lambda: self.set_control_status(OPER_PAUSED))
         self.ui.stopButton.clicked.connect(lambda: self.set_control_status(OPER_STOPPED))
         self.ui.operStatusCombo.activated.connect(self.set_control_status)
-        self.ui.controlModeCombo.activated.connect(lambda *_: self.save_control_parameters())
+        self.ui.controlModeCombo.currentIndexChanged.connect(
+            lambda *_: self._mark_control_parameter_modified(
+                self.ui.controlModeCombo
+            )
+        )
+        self.ui.dataPeriodSpin.valueChanged.connect(
+            lambda *_: self._mark_control_parameter_modified(
+                self.ui.dataPeriodSpin
+            )
+        )
+        self.ui.operPeriodSpin.valueChanged.connect(
+            lambda *_: self._mark_control_parameter_modified(
+                self.ui.operPeriodSpin
+            )
+        )
         self.ui.saveControlButton.clicked.connect(self.save_control_parameters)
+        self.ui.refreshControlButton.clicked.connect(
+            self.manual_refresh_control_parameters
+        )
         self.ui.connectSimulatorButton.clicked.connect(
             lambda: self.set_io_connection_enabled(True)
         )
@@ -289,7 +314,9 @@ class OperatorMainWindow(QMainWindow):
             lambda: self.set_io_connection_enabled(False)
         )
         self.ui.saveDevicesButton.clicked.connect(self.save_devices)
+        self.ui.refreshDevicesButton.clicked.connect(self.manual_refresh_devices)
         self.ui.saveScadaButton.clicked.connect(self.save_scada)
+        self.ui.refreshScadaButton.clicked.connect(self.manual_refresh_scada)
         self.ui.homeCurveTree.itemChanged.connect(self._on_home_curve_item_changed)
         self.ui.homeCurveSelectAllButton.clicked.connect(lambda: self.set_all_home_curves(True))
         self.ui.homeCurveClearButton.clicked.connect(lambda: self.set_all_home_curves(False))
@@ -298,6 +325,13 @@ class OperatorMainWindow(QMainWindow):
         self.ui.historyQueryButton.clicked.connect(self.apply_history_filter)
         self.ui.logQueryButton.clicked.connect(self.apply_log_filters)
         self.ui.logResetButton.clicked.connect(self.reset_log_filters)
+        self.ui.logPageSizeCombo.currentTextChanged.connect(
+            self.change_log_page_size
+        )
+        self.ui.logPreviousPageButton.clicked.connect(
+            lambda: self.change_log_page(-1)
+        )
+        self.ui.logNextPageButton.clicked.connect(lambda: self.change_log_page(1))
         self.ui.logTable.currentCellChanged.connect(
             lambda *_: self.show_selected_log_detail()
         )
@@ -320,14 +354,56 @@ class OperatorMainWindow(QMainWindow):
         ):
             return
         self._dirty_editor_tables.add(table)
+        self._set_modified_property(table, True)
+        item.setBackground(QColor(MODIFIED_ITEM_COLOR))
+        if "未保存修改" not in item.toolTip():
+            existing_tooltip = item.toolTip().strip()
+            item.setToolTip(
+                f"{existing_tooltip}\n未保存修改：自动刷新不会覆盖此值".strip()
+            )
         if model in DEVICE_EDITABLE_FIELDS:
             self._update_device_save_state()
+        else:
+            self._update_scada_save_state()
+
+    @staticmethod
+    def _set_modified_property(widget: Any, modified: bool) -> None:
+        widget.setProperty("modified", bool(modified))
+        style = widget.style()
+        style.unpolish(widget)
+        style.polish(widget)
+        widget.update()
+
+    @property
+    def control_parameter_widgets(self) -> tuple[Any, ...]:
+        return (
+            self.ui.controlModeCombo,
+            self.ui.dataPeriodSpin,
+            self.ui.operPeriodSpin,
+        )
+
+    def _mark_control_parameter_modified(self, widget: Any) -> None:
+        self._dirty_control_widgets.add(widget)
+        self._set_modified_property(widget, True)
+        self.ui.saveControlButton.setEnabled(True)
+
+    def _clear_control_parameter_modifications(self) -> None:
+        for widget in self.control_parameter_widgets:
+            self._set_modified_property(widget, False)
+        self._dirty_control_widgets.clear()
+        self.ui.saveControlButton.setEnabled(False)
 
     def _update_device_save_state(self) -> None:
         has_changes = any(
             spec.table in self._dirty_editor_tables for spec in self.device_specs
         )
         self.ui.saveDevicesButton.setEnabled(has_changes)
+
+    def _update_scada_save_state(self) -> None:
+        has_changes = any(
+            spec.table in self._dirty_editor_tables for spec in self.scada_specs
+        )
+        self.ui.saveScadaButton.setEnabled(has_changes)
 
     def _apply_style(self) -> None:
         self.setStyleSheet(
@@ -383,6 +459,15 @@ class OperatorMainWindow(QMainWindow):
             }
             QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox { background: white; border: 1px solid #c9d2de;
                                                             border-radius: 4px; padding: 4px; }
+            QComboBox[modified="true"], QSpinBox[modified="true"],
+            QDoubleSpinBox[modified="true"], QLineEdit[modified="true"] {
+                background: #fff0c7; color: #714800; border: 2px solid #e0a000;
+            }
+            QTableWidget[modified="true"] { border: 2px solid #e0a000; }
+            QPushButton#saveControlButton:enabled,
+            QPushButton#saveScadaButton:enabled {
+                background: #e58a00; color: white; border-color: #c97700;
+            }
             QSplitter::handle { background: #e4e9ef; }
             QSplitter::handle:horizontal { width: 5px; }
             """
@@ -396,14 +481,23 @@ class OperatorMainWindow(QMainWindow):
     def show_success(self, message: str) -> None:
         self.statusBar().showMessage(message, 5000)
 
+    def _confirm_parameter_refresh(self, description: str, has_changes: bool) -> bool:
+        if not has_changes:
+            return True
+        answer = QMessageBox.question(
+            self,
+            "放弃未保存修改",
+            f"{description}存在未保存修改。是否放弃这些修改并从数据库重新加载？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return answer == QMessageBox.StandardButton.Yes
+
     def set_control_status(self, status: int) -> None:
         try:
             def update(session: Session) -> None:
                 control = session.get(OperatorControl, 1)
                 control.oper_status = status
-                control.control_status = self.ui.controlModeCombo.currentIndex()
-                control.data_period = self.ui.dataPeriodSpin.value()
-                control.oper_period = self.ui.operPeriodSpin.value()
 
             self.database.write(update)
             self.refresh_control()
@@ -424,7 +518,8 @@ class OperatorMainWindow(QMainWindow):
                 control.oper_period = oper_period
 
             self.database.write(update)
-            self._set_periodic_page_interval(data_period)
+            self._clear_control_parameter_modifications()
+            self.refresh_control(force_parameters=True)
             self.show_success(
                 f"控制参数已保存：{CONTROL_MODE_NAMES[mode]}，"
                 f"数据周期 {data_period} 秒，决策周期 {oper_period} 秒"
@@ -432,28 +527,52 @@ class OperatorMainWindow(QMainWindow):
         except Exception as exc:
             self.show_error("保存控制参数失败", exc)
 
+    def manual_refresh_control_parameters(self) -> None:
+        try:
+            if not self._confirm_parameter_refresh(
+                "运行控制参数",
+                bool(self._dirty_control_widgets),
+            ):
+                return
+            self.refresh_control(force_parameters=True)
+            self._clear_control_parameter_modifications()
+            self.show_success("运行控制参数已从数据库刷新")
+        except Exception as exc:
+            self.show_error("刷新运行控制参数失败", exc)
+
     def _set_periodic_page_interval(self, data_period: int) -> None:
         interval_ms = max(1, int(data_period)) * 1000
         if self.periodic_page_timer.interval() != interval_ms:
             self.periodic_page_timer.setInterval(interval_ms)
 
-    def refresh_control(self) -> int:
+    def refresh_control(self, *, force_parameters: bool = False) -> int:
         with self.database.session() as session:
             control = session.get(OperatorControl, 1)
             if control is None:
                 return max(1, self.ui.dataPeriodSpin.value())
             data_period = max(1, int(control.data_period))
             oper_period = max(1, int(control.oper_period))
-            self.ui.operStatusCombo.blockSignals(True)
-            self.ui.controlModeCombo.blockSignals(True)
-            self.ui.operStatusCombo.setCurrentIndex(max(0, min(2, control.oper_status)))
-            self.ui.controlModeCombo.setCurrentIndex(max(0, min(1, control.control_status)))
-            self.ui.dataPeriodSpin.setValue(data_period)
-            self.ui.operPeriodSpin.setValue(oper_period)
+            previous_status_signals = self.ui.operStatusCombo.blockSignals(True)
+            self.ui.operStatusCombo.setCurrentIndex(
+                max(0, min(2, control.oper_status))
+            )
+            self.ui.operStatusCombo.blockSignals(previous_status_signals)
+            parameter_values = (
+                (
+                    self.ui.controlModeCombo,
+                    max(0, min(1, control.control_status)),
+                ),
+                (self.ui.dataPeriodSpin, data_period),
+                (self.ui.operPeriodSpin, oper_period),
+            )
+            for widget, value in parameter_values:
+                if not force_parameters and widget in self._dirty_control_widgets:
+                    continue
+                previous_signals = widget.blockSignals(True)
+                widget.setValue(value) if hasattr(widget, "setValue") else widget.setCurrentIndex(value)
+                widget.blockSignals(previous_signals)
             self.ui.dataTimeValue.setText(format_simu_time(control.data_time_curr))
             self.ui.operTimeValue.setText(format_simu_time(control.oper_time_curr))
-            self.ui.operStatusCombo.blockSignals(False)
-            self.ui.controlModeCombo.blockSignals(False)
         self._set_periodic_page_interval(data_period)
         return data_period
 
@@ -544,6 +663,7 @@ class OperatorMainWindow(QMainWindow):
         finally:
             table.blockSignals(previous_signal_state)
         self._dirty_editor_tables.discard(table)
+        self._set_modified_property(table, False)
 
     def _table_values(self, table: QTableWidget, model: type) -> list[dict[str, Any]]:
         columns = list(model.__table__.columns)
@@ -680,6 +800,18 @@ class OperatorMainWindow(QMainWindow):
         self._load_editors(self.device_specs)
         self._update_device_save_state()
 
+    def manual_refresh_devices(self) -> None:
+        try:
+            if not self._confirm_parameter_refresh(
+                "设备参数",
+                self._editor_page_has_pending_changes(self.device_specs),
+            ):
+                return
+            self.load_devices()
+            self.show_success("设备参数已从数据库刷新")
+        except Exception as exc:
+            self.show_error("刷新设备参数失败", exc)
+
     def save_devices(self) -> None:
         try:
             self._save_device_editors()
@@ -690,7 +822,21 @@ class OperatorMainWindow(QMainWindow):
 
     def load_scada(self) -> None:
         self._load_editors(self.scada_specs)
+        self._update_scada_save_state()
         self.refresh_io_connection_status()
+
+    def manual_refresh_scada(self) -> None:
+        try:
+            if not self._confirm_parameter_refresh(
+                "RTU 与四遥参数",
+                self._editor_page_has_pending_changes(self.scada_specs),
+            ):
+                return
+            self.load_scada()
+            self.populate_history_tree()
+            self.show_success("RTU 与四遥参数已从数据库刷新")
+        except Exception as exc:
+            self.show_error("刷新 RTU 与四遥参数失败", exc)
 
     def refresh_io_connection_status(self) -> None:
         with self.database.session() as session:
@@ -972,30 +1118,77 @@ class OperatorMainWindow(QMainWindow):
                 result.append(CurveSeries(curve.name, curve.color, points, curve.line_width))
         return result
 
-    def refresh_logs(self) -> None:
+    def _log_filter_clauses(self) -> list[Any]:
+        clauses: list[Any] = []
+        if self.log_type_filter is not None:
+            clauses.append(OperatorLog.log_type == self.log_type_filter)
+        if self.log_start_seconds > 0:
+            clauses.append(OperatorLog.simu_time >= self.log_start_seconds)
+        if self.log_end_seconds is not None:
+            clauses.append(OperatorLog.simu_time <= self.log_end_seconds)
+        if self.log_keyword:
+            clauses.append(OperatorLog.log_info.contains(self.log_keyword))
+        return clauses
+
+    def refresh_logs(self, *, preserve_selection: bool = True) -> None:
         table = self.ui.logTable
         current_item = table.item(table.currentRow(), 0) if table.currentRow() >= 0 else None
         selected_id = (
             int(current_item.data(Qt.ItemDataRole.UserRole))
-            if current_item is not None
+            if preserve_selection
+            and current_item is not None
             and current_item.data(Qt.ItemDataRole.UserRole) is not None
             else None
         )
         horizontal_scroll = table.horizontalScrollBar().value()
         vertical_scroll = table.verticalScrollBar().value()
-        statement = select(OperatorLog)
-        if self.log_type_filter is not None:
-            statement = statement.where(OperatorLog.log_type == self.log_type_filter)
-        if self.log_start_seconds > 0:
-            statement = statement.where(OperatorLog.simu_time >= self.log_start_seconds)
-        if self.log_end_seconds is not None:
-            statement = statement.where(OperatorLog.simu_time <= self.log_end_seconds)
-        if self.log_keyword:
-            statement = statement.where(OperatorLog.log_info.contains(self.log_keyword))
+        clauses = self._log_filter_clauses()
         with self.database.session() as session:
+            self.log_total_count = int(
+                session.scalar(
+                    select(func.count())
+                    .select_from(OperatorLog)
+                    .where(*clauses)
+                )
+                or 0
+            )
+            self.log_total_pages = max(
+                1,
+                (self.log_total_count + self.log_page_size - 1)
+                // self.log_page_size,
+            )
+            if selected_id is not None:
+                selected_exists = session.scalar(
+                    select(OperatorLog.id)
+                    .where(OperatorLog.id == selected_id, *clauses)
+                    .limit(1)
+                )
+                if selected_exists is not None:
+                    newer_count = int(
+                        session.scalar(
+                            select(func.count())
+                            .select_from(OperatorLog)
+                            .where(OperatorLog.id > selected_id, *clauses)
+                        )
+                        or 0
+                    )
+                    self.log_page = newer_count // self.log_page_size + 1
+            self.log_page = min(max(1, self.log_page), self.log_total_pages)
+            offset = (self.log_page - 1) * self.log_page_size
             rows = session.scalars(
-                statement.order_by(OperatorLog.id.desc())
+                select(OperatorLog)
+                .where(*clauses)
+                .order_by(OperatorLog.id.desc())
+                .limit(self.log_page_size)
+                .offset(offset)
             ).all()
+
+        self.ui.logTotalLabel.setText(f"共 {self.log_total_count} 条")
+        self.ui.logPageInfoLabel.setText(
+            f"第 {self.log_page} / {self.log_total_pages} 页"
+        )
+        self.ui.logPreviousPageButton.setEnabled(self.log_page > 1)
+        self.ui.logNextPageButton.setEnabled(self.log_page < self.log_total_pages)
 
         previous_signal_state = table.blockSignals(True)
         selected_row = -1
@@ -1041,6 +1234,27 @@ class OperatorMainWindow(QMainWindow):
         if rows:
             self.show_selected_log_detail()
 
+    def change_log_page(self, offset: int) -> None:
+        target_page = min(
+            max(1, self.log_page + int(offset)),
+            self.log_total_pages,
+        )
+        if target_page == self.log_page:
+            return
+        self.log_page = target_page
+        self.refresh_logs(preserve_selection=False)
+
+    def change_log_page_size(self, text: str) -> None:
+        try:
+            page_size = int(text)
+        except (TypeError, ValueError):
+            return
+        if page_size not in (50, 100, 200, 500):
+            return
+        self.log_page_size = page_size
+        self.log_page = 1
+        self.refresh_logs(preserve_selection=False)
+
     @staticmethod
     def _parse_log_payload(log_info: str) -> Any:
         try:
@@ -1082,8 +1296,12 @@ class OperatorMainWindow(QMainWindow):
             self.log_start_seconds = start
             self.log_end_seconds = end
             self.log_keyword = self.ui.logKeywordEdit.text().strip()
-            self.refresh_logs()
-            self.show_success(f"运行日志查询完成，共 {self.ui.logTable.rowCount()} 条")
+            self.log_page = 1
+            self.refresh_logs(preserve_selection=False)
+            self.show_success(
+                f"运行日志查询完成，共 {self.log_total_count} 条，"
+                f"当前第 {self.log_page}/{self.log_total_pages} 页"
+            )
         except Exception as exc:
             self.show_error("运行日志查询条件无效", exc)
 
@@ -1096,7 +1314,8 @@ class OperatorMainWindow(QMainWindow):
         self.log_start_seconds = 0
         self.log_end_seconds = None
         self.log_keyword = ""
-        self.refresh_logs()
+        self.log_page = 1
+        self.refresh_logs(preserve_selection=False)
 
     @staticmethod
     def _display_log_value(value: Any) -> str:
@@ -1405,27 +1624,37 @@ def main() -> None:
         help="仅启动界面，不启动 Core/IO 子线程（仅测试或维护使用）",
     )
     args = parser.parse_args()
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s [%(threadName)s] %(name)s: %(message)s",
-    )
-    database = Database(args.db)
-    initialize_database(database)
-    application = QApplication(sys.argv)
-    application.setApplicationName("Power System Operator")
-    runtime = None
-    if not args.no_workers:
-        runtime = OperatorRuntimeThreads(
-            database_path=database.path,
-            simulator_host=args.simulator_host,
-            simulator_port=args.simulator_port,
-            rtu_id=args.rtu_id,
-            poll_seconds=max(0.05, args.poll),
-            core_poll_seconds=max(0.05, args.core_poll),
-            startup_timeout=max(0.1, args.worker_start_timeout),
-            stop_timeout=max(0.1, args.worker_stop_timeout),
+    instance_guard = SingleInstanceGuard()
+    if not instance_guard.acquire():
+        print(
+            "operator_mmi 已经在运行，禁止重复启动第二个实例。",
+            file=sys.stderr,
+            flush=True,
         )
+        raise SystemExit(2)
+
+    database = None
+    runtime = None
     try:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s [%(threadName)s] %(name)s: %(message)s",
+        )
+        database = Database(args.db)
+        initialize_database(database)
+        application = QApplication(sys.argv)
+        application.setApplicationName("Power System Operator")
+        if not args.no_workers:
+            runtime = OperatorRuntimeThreads(
+                database_path=database.path,
+                simulator_host=args.simulator_host,
+                simulator_port=args.simulator_port,
+                rtu_id=args.rtu_id,
+                poll_seconds=max(0.05, args.poll),
+                core_poll_seconds=max(0.05, args.core_poll),
+                startup_timeout=max(0.1, args.worker_start_timeout),
+                stop_timeout=max(0.1, args.worker_stop_timeout),
+            )
         window = OperatorMainWindow(database, runtime=runtime)
         window.show()
         exit_code = application.exec()
@@ -1435,7 +1664,9 @@ def main() -> None:
                 runtime.stop_and_wait()
             except Exception:
                 LOGGER.exception("MMI 退出清理 Core/IO 子线程失败")
-        database.dispose()
+        if database is not None:
+            database.dispose()
+        instance_guard.release()
     raise SystemExit(exit_code)
 
 

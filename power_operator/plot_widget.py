@@ -30,6 +30,7 @@ class InteractivePlot(QWidget):
         self._pan_origin = QPointF(0.0, 0.0)
         self._cursor_time: float | None = None
         self._cursor_samples: tuple[tuple[CurveSeries, float, float], ...] = ()
+        self._cursor_position: QPointF | None = None
         self.setMinimumSize(320, 220)
         self.setMouseTracking(True)
         self.setToolTip(
@@ -40,6 +41,7 @@ class InteractivePlot(QWidget):
         self.series = series
         self._cursor_time = None
         self._cursor_samples = ()
+        self._cursor_position = None
         self.update()
 
     def reset_view(self) -> None:
@@ -47,6 +49,7 @@ class InteractivePlot(QWidget):
         self.pan = QPointF(0.0, 0.0)
         self._cursor_time = None
         self._cursor_samples = ()
+        self._cursor_position = None
         self.update()
 
     def plot_rect(self) -> QRectF:
@@ -65,11 +68,37 @@ class InteractivePlot(QWidget):
         )
         return self._cursor_time, samples
 
+    @staticmethod
+    def cursor_panel_background() -> QColor:
+        """Return the intentionally transparent cursor panel background."""
+
+        return QColor(255, 255, 255, 0)
+
+    def cursor_panel_rect(self) -> QRectF | None:
+        """Return the current mouse-following readout panel rectangle."""
+
+        if (
+            self._cursor_time is None
+            or not self._cursor_samples
+            or self._cursor_position is None
+        ):
+            return None
+        panel_rect, *_rest = self._cursor_panel_layout(
+            QFontMetrics(self.font()),
+            self.plot_rect(),
+        )
+        return panel_rect
+
     def _clear_cursor(self) -> None:
-        if self._cursor_time is None and not self._cursor_samples:
+        if (
+            self._cursor_time is None
+            and not self._cursor_samples
+            and self._cursor_position is None
+        ):
             return
         self._cursor_time = None
         self._cursor_samples = ()
+        self._cursor_position = None
         self.update()
 
     def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802 - Qt API
@@ -77,6 +106,7 @@ class InteractivePlot(QWidget):
         self.zoom = max(0.5, min(20.0, self.zoom * factor))
         self._cursor_time = None
         self._cursor_samples = ()
+        self._cursor_position = None
         self.update()
         event.accept()
 
@@ -86,6 +116,7 @@ class InteractivePlot(QWidget):
             self._pan_origin = QPointF(self.pan)
             self._cursor_time = None
             self._cursor_samples = ()
+            self._cursor_position = None
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             self.update()
             event.accept()
@@ -193,11 +224,77 @@ class InteractivePlot(QWidget):
             )
             samples.append((curve, float(sample_time), float(sample_value)))
         new_samples = tuple(samples)
-        if cursor_time == self._cursor_time and new_samples == self._cursor_samples:
+        new_position = QPointF(position)
+        if (
+            cursor_time == self._cursor_time
+            and new_samples == self._cursor_samples
+            and new_position == self._cursor_position
+        ):
             return
         self._cursor_time = cursor_time
         self._cursor_samples = new_samples
+        self._cursor_position = new_position
         self.update()
+
+    def _cursor_panel_layout(
+        self,
+        font_metrics: QFontMetrics,
+        plot_rect: QRectF,
+    ) -> tuple[
+        QRectF,
+        list[tuple[tuple[CurveSeries, float, float], ...]],
+        int,
+        int,
+        float,
+    ]:
+        line_height = max(18, font_metrics.height() + 4)
+        padding = 7
+        available_height = max(1, int(plot_rect.height()) - 12 - 2 * padding)
+        rows_per_column = max(1, (available_height - line_height) // line_height)
+        columns = [
+            self._cursor_samples[index : index + rows_per_column]
+            for index in range(0, len(self._cursor_samples), rows_per_column)
+        ]
+        labels = [
+            f"{curve.name}: {format_float(sample_value)}"
+            for curve, _sample_time, sample_value in self._cursor_samples
+        ]
+        desired_column_width = min(
+            230,
+            max(130, max(font_metrics.horizontalAdvance(label) + 28 for label in labels)),
+        )
+        max_panel_width = max(80.0, plot_rect.width() - 12)
+        panel_width = min(
+            max_panel_width,
+            2 * padding + desired_column_width * len(columns),
+        )
+        column_width = max(1.0, (panel_width - 2 * padding) / len(columns))
+        panel_height = min(
+            plot_rect.height() - 12,
+            2 * padding
+            + line_height
+            * (1 + max(len(column) for column in columns)),
+        )
+
+        cursor_position = self._cursor_position or plot_rect.center()
+        offset = 14.0
+        inset = 6.0
+        panel_x = cursor_position.x() + offset
+        panel_y = cursor_position.y() + offset
+        if panel_x + panel_width > plot_rect.right() - inset:
+            panel_x = cursor_position.x() - panel_width - offset
+        if panel_y + panel_height > plot_rect.bottom() - inset:
+            panel_y = cursor_position.y() - panel_height - offset
+        panel_x = max(
+            plot_rect.left() + inset,
+            min(panel_x, plot_rect.right() - inset - panel_width),
+        )
+        panel_y = max(
+            plot_rect.top() + inset,
+            min(panel_y, plot_rect.bottom() - inset - panel_height),
+        )
+        panel_rect = QRectF(panel_x, panel_y, panel_width, panel_height)
+        return panel_rect, columns, line_height, padding, column_width
 
     def _draw_cursor(
         self,
@@ -229,41 +326,16 @@ class InteractivePlot(QWidget):
         painter.restore()
 
         font_metrics = QFontMetrics(painter.font())
-        line_height = max(18, font_metrics.height() + 4)
-        padding = 7
-        available_height = max(1, int(plot_rect.height()) - 12 - 2 * padding)
-        rows_per_column = max(1, (available_height - line_height) // line_height)
-        columns = [
-            self._cursor_samples[index : index + rows_per_column]
-            for index in range(0, len(self._cursor_samples), rows_per_column)
-        ]
-        labels = [
-            f"{curve.name}: {format_float(sample_value)}"
-            for curve, _sample_time, sample_value in self._cursor_samples
-        ]
-        desired_column_width = min(
-            230,
-            max(130, max(font_metrics.horizontalAdvance(label) + 28 for label in labels)),
+        panel_rect, columns, line_height, padding, column_width = (
+            self._cursor_panel_layout(font_metrics, plot_rect)
         )
-        max_panel_width = max(80.0, plot_rect.width() - 12)
-        panel_width = min(
-            max_panel_width,
-            2 * padding + desired_column_width * len(columns),
-        )
-        column_width = max(1.0, (panel_width - 2 * padding) / len(columns))
-        panel_height = min(
-            plot_rect.height() - 12,
-            2 * padding
-            + line_height
-            * (1 + max(len(column) for column in columns)),
-        )
-        panel_x = plot_rect.right() - panel_width - 6
-        panel_y = plot_rect.top() + 6
-        panel_rect = QRectF(panel_x, panel_y, panel_width, panel_height)
+        panel_x = panel_rect.x()
+        panel_y = panel_rect.y()
+        panel_width = panel_rect.width()
 
         painter.save()
-        painter.setPen(QPen(QColor("#9aabba"), 1))
-        painter.setBrush(QColor(255, 255, 255, 232))
+        painter.setPen(QPen(QColor(154, 171, 186, 190), 1))
+        painter.setBrush(self.cursor_panel_background())
         painter.drawRoundedRect(panel_rect, 5, 5)
         painter.setPen(QColor("#263238"))
         painter.drawText(

@@ -66,3 +66,42 @@ def test_plot_cursor_is_cleared_when_data_or_view_changes():
         assert plot.cursor_readout() == (None, ())
     finally:
         plot.close()
+
+
+def test_cursor_text_panel_follows_mouse_and_has_transparent_background():
+    application = QApplication.instance() or QApplication([])
+    plot = InteractivePlot("跟随鼠标游标测试")
+    plot.resize(640, 360)
+    plot.set_series(
+        [
+            CurveSeries("风电", "#2f80ed", [(0.0, 1.0), (10.0, 2.0), (20.0, 3.0)]),
+            CurveSeries("负荷", "#eb5757", [(0.0, 3.0), (10.0, 4.0), (20.0, 5.0)]),
+        ]
+    )
+    plot.show()
+    application.processEvents()
+    try:
+        plot_rect = plot.plot_rect()
+        first_mouse = QPoint(int(plot_rect.center().x()), int(plot_rect.top() + 45))
+        second_mouse = QPoint(int(plot_rect.center().x()), int(plot_rect.top() + 125))
+
+        QTest.mouseMove(plot, first_mouse)
+        application.processEvents()
+        first_cursor_time = plot.cursor_readout()[0]
+        first_panel = plot.cursor_panel_rect()
+
+        QTest.mouseMove(plot, second_mouse)
+        application.processEvents()
+        second_cursor_time = plot.cursor_readout()[0]
+        second_panel = plot.cursor_panel_rect()
+
+        assert first_cursor_time == second_cursor_time == 10.0
+        assert first_panel is not None
+        assert second_panel is not None
+        assert first_panel.top() != second_panel.top()
+        assert plot_rect.contains(first_panel)
+        assert plot_rect.contains(second_panel)
+        assert plot.cursor_panel_background().alpha() == 0
+        assert not plot.grab().isNull()
+    finally:
+        plot.close()
