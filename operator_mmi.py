@@ -853,10 +853,7 @@ class OperatorMainWindow(QMainWindow):
             ).all()
         self.ui.connectSimulatorButton.setEnabled(not connection_enabled)
         self.ui.disconnectSimulatorButton.setEnabled(connection_enabled)
-        connected_count = sum(1 for row in rows if int(row.status) == 1)
-        active = next((row for row in rows if int(row.status) == 1), rows[0] if rows else None)
-        connected = active is not None and int(active.status) == 1
-        self.ui.ioConnectionStatusValue.setText("连接成功" if connected else "连接中断")
+        connected = any(int(row.status) == 1 for row in rows)
         self.ui.simulatorConnectionStatusValue.setText("正常" if connected else "中断")
         if connected:
             colors = ("#e8f5e9", "#1b5e20", "#81c784")
@@ -866,19 +863,7 @@ class OperatorMainWindow(QMainWindow):
             f"background: {colors[0]}; color: {colors[1]}; border: 1px solid {colors[2]}; "
             "border-radius: 5px; padding: 4px 12px; font-weight: 700;"
         )
-        self.ui.ioConnectionStatusValue.setStyleSheet(badge_style)
         self.ui.simulatorConnectionStatusValue.setStyleSheet(badge_style)
-        if active is None:
-            self.ui.ioConnectionDetailLabel.setText("尚无 RTU 连接记录")
-            return
-        endpoint = active.ip or "--"
-        if active.port:
-            endpoint = f"{endpoint}:{active.port}"
-        self.ui.ioConnectionDetailLabel.setText(
-            f"RTU {active.id}  |  对端 {endpoint}  |  "
-            f"刷新时刻 {format_wall_time(active.refresh_time)}  |  "
-            f"在线 {connected_count}/{len(rows)}"
-        )
 
     def set_io_connection_enabled(self, enabled: bool) -> None:
         """Request operator_io to establish or suspend its TCP connection."""

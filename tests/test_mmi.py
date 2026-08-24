@@ -87,7 +87,10 @@ def test_mmi_constructs_all_pages_and_editors(tmp_path):
         assert window.ui.deviceTabs.count() == 5
         assert window.ui.scadaTabs.count() == 5
         assert window.ui.scadaTabs.widget(0).objectName() == "rtuPage"
-        assert window.ui.ioConnectionStatusValue.text() == "连接成功"
+        assert not hasattr(window.ui, "ioConnectionGroup")
+        assert not hasattr(window.ui, "ioConnectionStatusValue")
+        assert not hasattr(window.ui, "ioConnectionDetailLabel")
+        assert window.ui.scadaLayout.itemAt(0).widget() is window.ui.scadaTabs
         assert window.ui.simulatorConnectionCaptionLabel.text() == "电网模拟器连接"
         assert window.ui.simulatorConnectionStatusValue.text() == "正常"
         assert "#1b5e20" in window.ui.simulatorConnectionStatusValue.styleSheet()
@@ -175,9 +178,6 @@ def test_mmi_constructs_all_pages_and_editors(tmp_path):
             window.ui.mainTabs.setCurrentWidget(window.ui.logPage)
             assert_equal_widths(window.ui.logTable)
             assert_equal_widths(window.ui.logDetailTree)
-        assert "RTU 1" in window.ui.ioConnectionDetailLabel.text()
-        assert "127.0.0.1:9200" in window.ui.ioConnectionDetailLabel.text()
-        assert format_wall_time(1_787_422_688) in window.ui.ioConnectionDetailLabel.text()
         assert not hasattr(window.ui, "currentValuesScroll")
         assert len(window.current_value_edits) == 17
         assert all(editor.text() == "--" for editor in window.current_value_edits.values())
@@ -267,7 +267,6 @@ def test_mmi_constructs_all_pages_and_editors(tmp_path):
         with db.session() as session:
             assert session.get(OperatorControl, 1).io_connect_enabled == 0
             assert session.get(ScadaRtu, 1).status == 0
-        assert window.ui.ioConnectionStatusValue.text() == "连接中断"
         assert window.ui.simulatorConnectionStatusValue.text() == "中断"
         assert "#b42318" in window.ui.simulatorConnectionStatusValue.styleSheet()
         assert window.ui.connectSimulatorButton.isEnabled()

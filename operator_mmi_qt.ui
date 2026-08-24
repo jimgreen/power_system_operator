@@ -172,20 +172,8 @@
       <widget class="QWidget" name="scadaPage">
        <attribute name="title"><string>RTU / 四遥定义</string></attribute>
        <layout class="QVBoxLayout" name="scadaLayout">
-        <item>
-         <widget class="QGroupBox" name="ioConnectionGroup">
-          <property name="sizePolicy"><sizepolicy hsizetype="Expanding" vsizetype="Maximum"><horstretch>0</horstretch><verstretch>0</verstretch></sizepolicy></property>
-          <property name="title"><string>operator_io 连接状态</string></property>
-          <layout class="QHBoxLayout" name="ioConnectionLayout">
-           <item><widget class="QLabel" name="ioConnectionCaptionLabel"><property name="text"><string>当前状态</string></property></widget></item>
-           <item><widget class="QLabel" name="ioConnectionStatusValue"><property name="minimumSize"><size><width>100</width><height>0</height></size></property><property name="alignment"><set>Qt::AlignmentFlag::AlignCenter</set></property><property name="text"><string>连接中断</string></property></widget></item>
-           <item><widget class="QLabel" name="ioConnectionDetailLabel"><property name="text"><string>尚无 RTU 连接记录</string></property></widget></item>
-           <item><spacer name="ioConnectionSpacer"><property name="orientation"><enum>Qt::Orientation::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
-          </layout>
-         </widget>
-        </item>
-        <item>
-         <widget class="QTabWidget" name="scadaTabs">
+         <item>
+          <widget class="QTabWidget" name="scadaTabs">
           <widget class="QWidget" name="rtuPage"><attribute name="title"><string>RTU</string></attribute><layout class="QVBoxLayout" name="rtuLayout"><item><widget class="QTableWidget" name="rtuTable"><property name="alternatingRowColors"><bool>true</bool></property></widget></item></layout></widget>
           <widget class="QWidget" name="ycPage"><attribute name="title"><string>遥测 YC</string></attribute><layout class="QVBoxLayout" name="ycLayout"><item><widget class="QTableWidget" name="ycTable"><property name="alternatingRowColors"><bool>true</bool></property></widget></item></layout></widget>
           <widget class="QWidget" name="yxPage"><attribute name="title"><string>遥信 YX</string></attribute><layout class="QVBoxLayout" name="yxLayout"><item><widget class="QTableWidget" name="yxTable"><property name="alternatingRowColors"><bool>true</bool></property></widget></item></layout></widget>
