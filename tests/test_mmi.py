@@ -153,6 +153,9 @@ def test_mmi_constructs_all_pages_and_editors(tmp_path):
             for tree in all_trees
             for column in range(tree.columnCount())
         )
+        assert window.ui.logDecisionProcessLabel.text() == "决策过程（逐行日志）"
+        assert window.ui.logDecisionProcessText.isReadOnly()
+        assert window.ui.logDecisionProcessText.minimumHeight() >= 150
         window.show()
 
         def assert_equal_widths(widget):
@@ -287,7 +290,9 @@ def test_mmi_constructs_all_pages_and_editors(tmp_path):
         window.close()
 
 
-def test_secondary_pages_refresh_on_data_period_not_fast_timer(tmp_path):
+def test_curves_and_definition_pages_refresh_automatically_but_logs_do_not(
+    tmp_path,
+):
     application = QApplication.instance() or QApplication([])
     database = Database(tmp_path / "ems.db")
     initialize_database(database)
@@ -323,22 +328,26 @@ def test_secondary_pages_refresh_on_data_period_not_fast_timer(tmp_path):
         assert window.refresh_timer.interval() == 1000
         assert window.periodic_page_timer.interval() == 6000
 
-        expected = {
+        expected_switch = {
             1: ("devices",),
             2: ("scada",),
             3: ("logs",),
+            4: ("history_tree", "history_plot"),
+        }
+        expected_periodic = {
+            1: ("devices",),
+            2: ("scada",),
+            3: (),
             4: ("history_plot",),
         }
-        for index, refreshed_names in expected.items():
+        for index, switched_names in expected_switch.items():
             for name in calls:
                 calls[name] = 0
             window.ui.mainTabs.setCurrentIndex(index)
             application.processEvents()
-            switched_names = (
-                ("history_tree", "history_plot") if index == 4 else refreshed_names
-            )
             for name, count_value in calls.items():
                 assert count_value == (1 if name in switched_names else 0)
+            assert window.periodic_page_timer.isActive() is (index in (1, 2, 4))
             for name in calls:
                 calls[name] = 0
 
@@ -347,7 +356,9 @@ def test_secondary_pages_refresh_on_data_period_not_fast_timer(tmp_path):
 
             window.refresh_periodic_page()
             for name, count_value in calls.items():
-                assert count_value == (1 if name in refreshed_names else 0)
+                assert count_value == (
+                    1 if name in expected_periodic[index] else 0
+                )
 
         for name in calls:
             calls[name] = 0
@@ -355,9 +366,14 @@ def test_secondary_pages_refresh_on_data_period_not_fast_timer(tmp_path):
         application.processEvents()
         assert calls["home"] == 1
         assert all(value == 0 for name, value in calls.items() if name != "home")
+        assert not window.periodic_page_timer.isActive()
 
         database.write(lambda session: set_periods(session, 9, 23))
+        for name in calls:
+            calls[name] = 0
         window.refresh_live_data()
+        assert calls["home"] == 1
+        assert all(value == 0 for name, value in calls.items() if name != "home")
         assert window.periodic_page_timer.interval() == 9000
     finally:
         window.close()
@@ -884,10 +900,23 @@ def test_log_page_browses_decision_input_process_output_and_preserves_selection(
                 "name": "renewable_priority",
                 "executed": True,
                 "before": {"load_kw": 123.45678},
-                "action": {"wind_kw": 80.12345},
-                "after": {"remaining_kw": 43.33333},
+                "action": {
+                    "wind_available_kw": 80.12345,
+                    "solar_available_kw": 0.0,
+                    "renewable_available_kw": 80.12345,
+                },
+                "after": {"load_after_available_renewable_kw": 43.33333},
                 "reason": "renewable_first",
-            }
+            },
+            {
+                "step": 2,
+                "name": "storage_charge",
+                "executed": False,
+                "before": {"surplus_kw": 0.0, "charge_limit_kw": 20.0},
+                "action": {"charge_kw": 0.0, "allocation_kw": {}},
+                "after": {"surplus_after_charge_kw": 0.0},
+                "reason": "no_surplus",
+            },
         ],
         "outputs": {
             "devices": [{"table": "dev_wind_gen", "id": 1, "p_set_after": 80.12345}],
@@ -946,13 +975,21 @@ def test_log_page_browses_decision_input_process_output_and_preserves_selection(
         assert [
             window.ui.logDetailTree.topLevelItem(index).text(0)
             for index in range(window.ui.logDetailTree.topLevelItemCount())
-        ] == ["触发条件", "输入", "决策过程", "输出", "平衡校验 / 警告"]
+        ] == ["触发条件", "输入", "输出", "平衡校验 / 警告"]
         detail_texts = []
         iterator = window.iter_tree_items(window.ui.logDetailTree)
         for item in iterator:
             detail_texts.extend([item.text(0), item.text(1)])
         assert "123.457" in detail_texts
         assert "80.123" in detail_texts
+        process_lines = window.ui.logDecisionProcessText.toPlainText().splitlines()
+        assert process_lines == [
+            "01｜已执行｜新能源优先｜负荷 123.457 kW；可用风电 80.123 kW；"
+            "可用光伏 0.000 kW；新能源后剩余负荷 43.333 kW｜原因：新能源优先",
+            "02｜未触发｜储能充电｜过剩功率 0.000 kW；可充上限 20.000 kW；"
+            "充电功率 0.000 kW；充电后剩余 0.000 kW｜原因：没有过剩功率",
+        ]
+        assert "[1]" not in window.ui.logDecisionProcessText.toPlainText()
         raw = window.ui.logRawText.toPlainText()
         assert '"decision_id": "decision-3661-000001"' in raw
         assert "renewable_priority" in raw

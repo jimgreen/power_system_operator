@@ -274,6 +274,21 @@
                <layout class="QVBoxLayout" name="logFormattedLayout">
                 <property name="leftMargin"><number>0</number></property><property name="topMargin"><number>6</number></property><property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property>
                 <item>
+                 <widget class="QLabel" name="logDecisionProcessLabel">
+                  <property name="font"><font><bold>true</bold></font></property>
+                  <property name="text"><string>决策过程（逐行日志）</string></property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QPlainTextEdit" name="logDecisionProcessText">
+                  <property name="minimumSize"><size><width>0</width><height>160</height></size></property>
+                  <property name="maximumSize"><size><width>16777215</width><height>240</height></size></property>
+                  <property name="readOnly"><bool>true</bool></property>
+                  <property name="lineWrapMode"><enum>QPlainTextEdit::LineWrapMode::WidgetWidth</enum></property>
+                  <property name="placeholderText"><string>选择一条控制决策日志后，按执行顺序逐行显示策略过程。</string></property>
+                 </widget>
+                </item>
+                <item>
                  <widget class="QTreeWidget" name="logDetailTree">
                   <property name="alternatingRowColors"><bool>true</bool></property>
                   <property name="uniformRowHeights"><bool>true</bool></property>

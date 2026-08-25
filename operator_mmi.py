@@ -86,6 +86,42 @@ LOG_TYPE_NAMES = {
     LOG_ERROR: "错误",
     LOG_DECISION: "控制决策",
 }
+DECISION_STEP_NAMES = {
+    "renewable_priority": "新能源优先",
+    "diesel_minimum": "柴发最小出力",
+    "storage_charge": "储能充电",
+    "renewable_curtailment": "新能源削减",
+    "diesel_increase": "柴发增发",
+    "storage_discharge": "储能放电",
+    "unserved_energy": "未供电量",
+    "status_decision": "设备启停",
+    "power_balance": "功率平衡",
+}
+DECISION_REASON_NAMES = {
+    "renewable_first": "新能源优先",
+    "no_available_renewable": "没有可用新能源",
+    "running_diesel_minimum": "运行柴发保持最小出力",
+    "no_running_diesel_or_zero_minimum": "没有运行柴发或柴发下限为零",
+    "absorb_surplus": "储能吸收过剩功率",
+    "no_surplus": "没有过剩功率",
+    "no_charge_capacity": "没有可用充电能力",
+    "supply_deficit": "供电存在缺额，不执行充电",
+    "surplus_after_storage": "储能充电后仍有过剩功率",
+    "all_available_renewable_used": "全部可用新能源已利用",
+    "renewable_deficit": "新能源不足，柴发增发",
+    "diesel_minimum_sufficient_or_no_headroom_needed": (
+        "柴发最小出力已足够或无需增发"
+    ),
+    "cover_remaining_shortage": "储能弥补剩余缺额",
+    "no_shortage": "没有功率缺额",
+    "no_discharge_capacity": "没有可用放电能力",
+    "insufficient_total_supply": "总可用电源不足",
+    "load_fully_supplied": "负荷已全部满足",
+    "status_change_required": "当前状态与目标状态不一致",
+    "all_target_statuses_unchanged": "设备状态无需调整",
+    "within_tolerance": "功率平衡误差在允许范围内",
+    "tolerance_exceeded": "功率平衡误差超限",
+}
 SCADA_MODELS = {ScadaYc, ScadaYx, ScadaYt, ScadaYk}
 DEVICE_EDITABLE_FIELDS = {
     DevDiesalGen: frozenset({"name", "p_rated", "p_max", "p_min", "p_coeff"}),
@@ -231,7 +267,7 @@ class OperatorMainWindow(QMainWindow):
         self.periodic_page_timer.timeout.connect(self.refresh_periodic_page)
         self.refresh_all()
         self.refresh_timer.start(1000)
-        if self.ui.mainTabs.currentIndex() in (1, 2, 3, 4):
+        if self.ui.mainTabs.currentIndex() in (1, 2, 4):
             self.periodic_page_timer.start()
         if self.runtime is not None:
             self.runtime.start()
@@ -1217,6 +1253,7 @@ class OperatorMainWindow(QMainWindow):
         else:
             self.ui.logDetailTitleLabel.setText("日志详情")
             self.ui.logDetailTree.clear()
+            self.ui.logDecisionProcessText.clear()
             self.ui.logRawText.clear()
         table.horizontalScrollBar().setValue(horizontal_scroll)
         table.verticalScrollBar().setValue(vertical_scroll)
@@ -1316,6 +1353,133 @@ class OperatorMainWindow(QMainWindow):
             return ""
         return str(value)
 
+    @staticmethod
+    def _decision_kw(values: Any, key: str) -> str:
+        if not isinstance(values, dict):
+            return "--"
+        value = values.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return "--"
+        return f"{format_float(float(value))} kW"
+
+    @classmethod
+    def _decision_step_summary(cls, step: dict[str, Any]) -> str:
+        name = str(step.get("name", ""))
+        before = step.get("before") if isinstance(step.get("before"), dict) else {}
+        action = step.get("action") if isinstance(step.get("action"), dict) else {}
+        after = step.get("after") if isinstance(step.get("after"), dict) else {}
+        kw = cls._decision_kw
+
+        if name == "renewable_priority":
+            return (
+                f"负荷 {kw(before, 'load_kw')}；"
+                f"可用风电 {kw(action, 'wind_available_kw')}；"
+                f"可用光伏 {kw(action, 'solar_available_kw')}；"
+                f"新能源后剩余负荷 "
+                f"{kw(after, 'load_after_available_renewable_kw')}"
+            )
+        if name == "diesel_minimum":
+            units = before.get("diesel_units", 0)
+            return (
+                f"运行柴发 {units} 台；"
+                f"最小总出力 {kw(action, 'diesel_minimum_total_kw')}；"
+                f"新能源与柴发下限合计 "
+                f"{kw(after, 'renewable_plus_diesel_min_kw')}"
+            )
+        if name == "storage_charge":
+            return (
+                f"过剩功率 {kw(before, 'surplus_kw')}；"
+                f"可充上限 {kw(before, 'charge_limit_kw')}；"
+                f"充电功率 {kw(action, 'charge_kw')}；"
+                f"充电后剩余 {kw(after, 'surplus_after_charge_kw')}"
+            )
+        if name == "renewable_curtailment":
+            return (
+                f"新能源可用 {kw(before, 'renewable_available_kw')}；"
+                f"新能源设定 {kw(after, 'renewable_set_kw')}；"
+                f"削减功率 {kw(action, 'curtailment_kw')}"
+            )
+        if name == "diesel_increase":
+            return (
+                f"最小总出力 {kw(before, 'diesel_minimum_total_kw')}；"
+                f"增发功率 {kw(action, 'increase_kw')}；"
+                f"柴发设定总出力 {kw(after, 'diesel_set_total_kw')}"
+            )
+        if name == "storage_discharge":
+            return (
+                f"柴发后缺额 {kw(before, 'shortage_after_diesel_kw')}；"
+                f"可放上限 {kw(before, 'discharge_limit_kw')}；"
+                f"放电功率 {kw(action, 'discharge_kw')}；"
+                f"放电后缺额 {kw(after, 'shortage_after_discharge_kw')}"
+            )
+        if name == "unserved_energy":
+            return (
+                f"储能后缺额 {kw(before, 'shortage_after_discharge_kw')}；"
+                f"未供电功率 {kw(action, 'unserved_kw')}；"
+                f"已供负荷 {kw(after, 'served_load_kw')}"
+            )
+        if name == "status_decision":
+            current_statuses = before.get("current_statuses", {})
+            generated_yk = action.get("generated_yk", [])
+            current_count = len(current_statuses) if isinstance(current_statuses, dict) else 0
+            command_count = len(generated_yk) if isinstance(generated_yk, list) else 0
+            return f"检查设备 {current_count} 台；生成遥控指令 {command_count} 条"
+        if name == "power_balance":
+            return (
+                f"负荷 {kw(before, 'load_kw')}；"
+                f"风电设定 {kw(before, 'wind_set_kw')}；"
+                f"光伏设定 {kw(before, 'solar_set_kw')}；"
+                f"柴发设定 {kw(before, 'diesel_set_kw')}；"
+                f"储能出力 {kw(before, 'storage_set_kw')}；"
+                f"平衡误差 {kw(after, 'balance_error_kw')}"
+            )
+
+        fields: list[str] = []
+        for section_label, values in (("前", before), ("动作", action), ("后", after)):
+            for key, value in values.items():
+                if isinstance(value, bool):
+                    display = "是" if value else "否"
+                elif isinstance(value, float):
+                    display = format_float(value)
+                elif isinstance(value, (int, str)):
+                    display = str(value)
+                elif isinstance(value, (dict, list)):
+                    display = f"{len(value)} 项"
+                else:
+                    continue
+                fields.append(f"{section_label}.{key}={display}")
+                if len(fields) >= 6:
+                    break
+            if len(fields) >= 6:
+                break
+        return "；".join(fields) if fields else "没有过程摘要"
+
+    @classmethod
+    def _format_decision_process(cls, process: Any) -> str:
+        if not isinstance(process, list) or not process:
+            return "本次决策未记录过程。"
+        lines: list[str] = []
+        for index, value in enumerate(process, start=1):
+            if not isinstance(value, dict):
+                lines.append(f"{index:02d}｜过程记录格式无效｜{value}")
+                continue
+            raw_step = value.get("step", index)
+            try:
+                step_number = max(0, int(raw_step))
+                step_text = f"{step_number:02d}"
+            except (TypeError, ValueError):
+                step_text = str(raw_step)
+            executed = "已执行" if bool(value.get("executed")) else "未触发"
+            name = str(value.get("name", ""))
+            step_name = DECISION_STEP_NAMES.get(name, name or "未命名步骤")
+            reason = str(value.get("reason", ""))
+            reason_text = DECISION_REASON_NAMES.get(reason, reason or "未记录")
+            summary = cls._decision_step_summary(value)
+            lines.append(
+                f"{step_text}｜{executed}｜{step_name}｜{summary}｜原因：{reason_text}"
+            )
+        return "\n".join(lines)
+
     def _append_log_tree_value(
         self,
         parent: QTreeWidgetItem,
@@ -1361,13 +1525,19 @@ class OperatorMainWindow(QMainWindow):
         parsed = self._parse_log_payload(log_info)
         tree = self.ui.logDetailTree
         tree.clear()
+        process_scroll = self.ui.logDecisionProcessText.verticalScrollBar().value()
         if log_type == LOG_DECISION and isinstance(parsed, dict):
             decision_id = str(parsed.get("decision_id", ""))
             self.ui.logDetailTitleLabel.setText(f"控制决策详情  {decision_id}")
+            self.ui.logDecisionProcessLabel.show()
+            self.ui.logDecisionProcessText.show()
+            self.ui.logDecisionProcessText.setPlainText(
+                self._format_decision_process(parsed.get("process", []))
+            )
+            self.ui.logDecisionProcessText.verticalScrollBar().setValue(process_scroll)
             groups = [
                 ("触发条件", parsed.get("trigger", {})),
                 ("输入", parsed.get("inputs", {})),
-                ("决策过程", parsed.get("process", [])),
                 ("输出", parsed.get("outputs", {})),
                 ("平衡校验 / 警告", parsed.get("validation", {})),
             ]
@@ -1388,6 +1558,9 @@ class OperatorMainWindow(QMainWindow):
             self.ui.logDetailTitleLabel.setText(
                 f"{LOG_TYPE_NAMES.get(log_type, f'类型 {log_type}')}日志详情"
             )
+            self.ui.logDecisionProcessLabel.hide()
+            self.ui.logDecisionProcessText.hide()
+            self.ui.logDecisionProcessText.clear()
             tree.addTopLevelItem(QTreeWidgetItem(["日志内容", log_info]))
             raw_text = (
                 json.dumps(parsed, ensure_ascii=False, allow_nan=False, indent=2)
@@ -1515,7 +1688,6 @@ class OperatorMainWindow(QMainWindow):
         index: int,
         *,
         protect_edits: bool,
-        refresh_history_tree: bool,
     ) -> None:
         if index == 1:
             if protect_edits and self._editor_page_has_pending_changes(self.device_specs):
@@ -1527,14 +1699,7 @@ class OperatorMainWindow(QMainWindow):
                 self.statusBar().showMessage("四遥定义存在未保存编辑，已跳过自动刷新", 5000)
                 return
             self.load_scada()
-        elif index == 3:
-            if protect_edits and self._table_is_being_edited(self.ui.logTable):
-                self.statusBar().showMessage("运行日志表格正在编辑，已跳过自动刷新", 5000)
-                return
-            self.refresh_logs()
         elif index == 4:
-            if refresh_history_tree:
-                self.populate_history_tree()
             self.refresh_history_plot()
 
     def on_main_tab_changed(self, index: int) -> None:
@@ -1542,12 +1707,18 @@ class OperatorMainWindow(QMainWindow):
             if index == 0:
                 self.refresh_history_home()
                 self.periodic_page_timer.stop()
-            else:
+            elif index in (1, 2):
                 self._refresh_periodic_page(
                     index,
                     protect_edits=True,
-                    refresh_history_tree=True,
                 )
+                self.periodic_page_timer.start()
+            elif index == 3:
+                self.periodic_page_timer.stop()
+                self.refresh_logs()
+            elif index == 4:
+                self.populate_history_tree()
+                self.refresh_history_plot()
                 self.periodic_page_timer.start()
         except Exception as exc:
             self.show_error("刷新页面失败", exc)
@@ -1557,7 +1728,6 @@ class OperatorMainWindow(QMainWindow):
             self._refresh_periodic_page(
                 self.ui.mainTabs.currentIndex(),
                 protect_edits=True,
-                refresh_history_tree=False,
             )
         except Exception as exc:
             LOGGER.exception("当前页面运行周期刷新失败", exc_info=exc)
@@ -1567,8 +1737,7 @@ class OperatorMainWindow(QMainWindow):
         try:
             self.refresh_control()
             self.refresh_io_connection_status()
-            current = self.ui.mainTabs.currentIndex()
-            if current == 0:
+            if self.ui.mainTabs.currentIndex() == 0:
                 self.refresh_history_home()
         except Exception as exc:
             LOGGER.exception("界面周期刷新失败", exc_info=exc)
