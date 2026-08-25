@@ -13,6 +13,8 @@
 - `simulator_io_mock.py`：独立的内存 TCP Mock，仅用于本地联调，不读写正式数据库。
 - `rtu_client.py`：旧入站 Server 兼容模式的客户端示例。
 - `import_power_definitions.py`：把用户已有 `power.db` 中的设备和 SCADA 定义按目标 ORM 列复制到 `ems.db`；源库始终只读。
+- `generate_ems_principles_html.py`：以 SQLite `mode=ro` 只读提取指定数据库的实际 YC/YX/YT/YK 点位，生成 EMS 功能原理、算法流程与四遥点位 HTML。
+- `power_system_operator_ems_principles_and_scada_points.html`：独立、离线、响应式并支持 A4 打印的 EMS 工程参考文档；包含当前正式库 53 个四遥点位及搜索/类型过滤。
 
 ## 安装与数据库初始化
 
@@ -341,6 +343,25 @@ python -m py_compile operator_mmi_qt.py operator_mmi.py
 - 运行日志仅在 MMI 初始化、切换进入页面、点击查询/重置、上一页/下一页或修改每页条数时按需查询；停留在日志页时，1 秒和 `data_period` 定时器都不会访问 `operator_log`，避免日志持续增长后页面堵塞。
 - 所有表格、主页只读文本框、曲线数据和纵轴刻度中的浮点数统一显示三位小数；数据库仍保存原始浮点精度。
 - 所有数据表格的列宽平均分布，最后一列不单独拉伸；窗口缩放、切换页面或周期刷新后保持等宽。
+
+## EMS 功能原理、算法流程与四遥点位 HTML
+
+仓库提供独立参考文档 [power_system_operator_ems_principles_and_scada_points.html](power_system_operator_ems_principles_and_scada_points.html)，集中说明：
+
+- 唯一 MMI 宿主、Core/IO 受管线程、`ems.db` 状态总线和电网模拟器之间的数据闭环；
+- 0.5 秒控制检查、`data_period` 数据周期、`oper_period` 决策周期及墙钟/单调时钟/运行累计秒边界；
+- YC/YX 原请求位置映射、`time > 0` 有效性、实时状态和控制模式更新；
+- 风机分段三次功率曲线、光伏辐照折算、储能 SOC/效率边界及新能源优先有功调度；
+- 全局/设备开闭环边界、YT 每轮时标刷新、YK 状态差异判断、历史审计和 SQLite 并发恢复；
+- 从当前正式 `ems.db` 提取的 YC 17 点、YX 18 点、YT 8 点、YK 10 点，共 53 个实际四遥点位，并显示生成断面的值、运行时标和有效性。
+
+点位发生增删、改名或换库后，重新生成：
+
+```powershell
+python generate_ems_principles_html.py --db ems.db --output power_system_operator_ems_principles_and_scada_points.html
+```
+
+生成器以 SQLite `mode=ro` 打开数据库并先执行 `PRAGMA integrity_check`，不会初始化、迁移或写入正式库。HTML 不依赖 CDN、远程字体、图片或 Web 服务，支持关键词搜索、YC/YX/YT/YK 类型过滤、桌面/窄屏响应式布局和 A4 打印。
 
 ## 验证
 
