@@ -9,6 +9,7 @@ from power_operator.core import OPER_RUNNING
 from power_operator.database import Database, initialize_database
 from power_operator.io_service import (
     OperatorIoBridge,
+    SIMULATOR_CLIENT_ID,
     SimulatorIoClient,
     _map_measurement_response_rows,
 )
@@ -53,6 +54,37 @@ class RecordingCoreManager:
 
     def start(self) -> None:
         self.events.append(("start", self._snapshot()))
+
+
+def test_simulator_client_uses_stable_identity_for_ping_and_reconnects():
+    class RecordingState(SimulatorState):
+        def __init__(self):
+            super().__init__()
+            self.requests: list[dict] = []
+
+        def handle(self, request):
+            self.requests.append(request)
+            return super().handle(request)
+
+    state = RecordingState()
+    server = ThreadingSimulatorServer(("127.0.0.1", 0), state)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        host, port = server.server_address
+        client = SimulatorIoClient(host, port, timeout=2.0)
+        assert client.exchange({"action": "ping"})["ok"] is True
+        assert client.exchange(
+            {"action": "ping", "client_id": "untrusted_override"}
+        )["ok"] is True
+        assert [request["client_id"] for request in state.requests] == [
+            SIMULATOR_CLIENT_ID,
+            SIMULATOR_CLIENT_ID,
+        ]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2.0)
 
 
 @pytest.mark.parametrize(
@@ -227,8 +259,11 @@ def test_bridge_pulls_measurements_on_data_period_and_pushes_changed_commands_ea
     bridge.tick(monotonic_time=1.0)
 
     assert [request["action"] for request in requests] == ["read", "write"]
+    assert all(
+        request["client_id"] == SIMULATOR_CLIENT_ID for request in requests
+    )
     write = requests[1]
-    assert set(write) == {"action", "run_seq", "data"}
+    assert set(write) == {"action", "client_id", "run_seq", "data"}
     assert write["run_seq"] == 7
     assert [row["pnt_no"] for row in write["data"]["yt"]] == [31]
     assert [row["pnt_no"] for row in write["data"]["yk"]] == [41]
@@ -383,6 +418,7 @@ def test_bridge_uses_authoritative_simulator_time_and_nested_yc_yx_packet(tmp_pa
     def transport(request):
         assert request == {
             "action": "read",
+            "client_id": SIMULATOR_CLIENT_ID,
             "rtu_id": 7,
             "simu_time": 52,
             "data": {"yc": [1], "yx": [2001]},
@@ -937,6 +973,7 @@ def test_real_tcp_bridge_connection_switch_and_yk_status_filter(tmp_path):
         )
         bridge.tick(monotonic_time=0.5)
         assert [request["action"] for request, _ in state.exchanges] == ["read"]
+        assert state.exchanges[-1][0]["client_id"] == SIMULATOR_CLIENT_ID
         with database.session() as session:
             rtu = session.get(ScadaRtu, 7)
             assert (rtu.status, rtu.refresh_time) == (1, 1_787_422_688)
@@ -998,6 +1035,7 @@ def test_real_tcp_bridge_connection_switch_and_yk_status_filter(tmp_path):
         bridge.tick(monotonic_time=2.9)
         assert len(state.exchanges) == exchange_count + 1
         assert state.exchanges[-1][0]["action"] == "read"
+        assert state.exchanges[-1][0]["client_id"] == SIMULATOR_CLIENT_ID
         with database.session() as session:
             rtu = session.get(ScadaRtu, 7)
             assert (rtu.status, rtu.refresh_time) == (1, 1_787_422_689)

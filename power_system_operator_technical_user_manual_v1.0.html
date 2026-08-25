@@ -539,7 +539,7 @@
             <span class="badge">单进程双工作线程</span>
           </div>
           <div class="cover-meta">
-            <div><span>文档版本</span><strong>V1.0</strong></div>
+            <div><span>文档版本</span><strong>V1.0 修订 4</strong></div>
             <div><span>软件版本</span><strong>0.1.0</strong></div>
             <div><span>软件基线</span><strong>ad87b20b</strong></div>
             <div><span>发布日期</span><strong>2026-08-24</strong></div>
@@ -615,7 +615,7 @@ python simulator_io_mock.py --host 127.0.0.1 --port 9200
 python operator_mmi.py --db ems_demo.db \
   --simulator-host 127.0.0.1 --simulator-port 9200</code></pre>
 
-            <div class="callout warning"><strong>单实例保护：</strong>默认模式只启动 MMI，由它把同一数据库绝对路径传给 Core、IO 子线程。MMI 使用操作系统级原子锁，重复执行启动命令时，第二个实例会提示“operator_mmi 已经在运行”并立即退出，不会访问数据库或创建重复工作线程。不得再并行启动独立 <code>operator_core.py</code>/<code>operator_io.py</code>，否则仍会形成重复写者。相对路径仍可能在不同工作目录下生成多个同名数据库，正式运行应使用绝对路径。</div>
+            <div class="callout warning"><strong>单实例保护：</strong>默认模式只启动 MMI，由它把同一数据库绝对路径传给 Core、IO 子线程。MMI 使用操作系统级原子锁并另行发布真实 PID、启动参数和工作目录。重复执行启动命令时不会访问数据库或创建重复工作线程，而会恢复/置前已有的隐藏或最小化窗口，显示真实 PID 后以状态码 0 正常结束；只有锁仍被占用但窗口无法恢复时才以状态码 2 结束。正式启动禁止使用 <code>Start-Process -WindowStyle Hidden</code>；即使误带隐藏标志，程序也会通过 Qt 二次显示和 Windows <code>SW_RESTORE</code> 恢复窗口。不得再并行启动独立 <code>operator_core.py</code>/<code>operator_io.py</code>，否则仍会形成重复写者。相对路径仍可能在不同工作目录下生成多个同名数据库，正式运行应使用绝对路径。</div>
           </section>
 
           <section class="section" id="architecture">
@@ -816,11 +816,12 @@ python -m py_compile operator_mmi_qt.py operator_mmi.py</code></pre>
           <section class="section" id="protocol">
             <span class="section-label">08 · PROTOCOL</span>
             <h2 class="section-title">四遥通信协议</h2>
-            <p>默认结构为 <code>MMI/operator-io 子线程 --TCP client--&gt; simulator_io</code>。协议使用 UTF-8 JSON Lines：每次连接发送一行 JSON 请求并读取一行响应。</p>
+            <p>默认结构为 <code>MMI/operator-io 子线程 --TCP client--&gt; simulator_io</code>。协议使用 UTF-8 JSON Lines：每次连接发送一行 JSON 请求并读取一行响应。所有 read/write/ping 请求均由程序强制携带固定 <code>client_id="power_system_operator"</code>；短连接或断线重连不改变身份，调用者不能覆盖。模拟器因此将本项目稳定统计为一个最近 10 秒内成功 read/write 的在线业务客户端，而不是按瞬时套接字或累计建连次数统计。</p>
 
             <h3>YC/YX 读取请求</h3>
             <pre><code>{
   "action": "read",
+  "client_id": "power_system_operator",
   "rtu_id": 1,
   "simu_time": 2,
   "data": {
@@ -866,6 +867,7 @@ python -m py_compile operator_mmi_qt.py operator_mmi.py</code></pre>
             <h3>YT/YK 写请求</h3>
             <pre><code>{
   "action": "write",
+  "client_id": "power_system_operator",
   "run_seq": 7,
   "data": {
     "yt": [
@@ -1198,7 +1200,7 @@ p_max = calculate_wind_max_power(
             <pre><code>$env:QT_QPA_PLATFORM = 'offscreen'
 python -m pytest -q
 python -m compileall -q .</code></pre>
-            <p>软件基线提交验证结果：<strong>112 passed</strong>。测试范围包括数据库结构/迁移、定义导入、并发写、策略边界、新任务与时钟回退、旧任务控制拒绝、四遥协议、未知点告警、决策审计、MMI 单实例和自动托管线程、运行日志数据库分页、橙黄色参数脏状态、手动刷新与自动刷新保护、透明跟随曲线游标和三位小数显示。</p>
+            <p>当前发布候选验证结果：<strong>122 passed</strong>。测试范围包括数据库结构/迁移、定义导入、并发写、设备 <code>control_mode</code>、策略边界、新任务与时钟回退、旧任务控制拒绝、固定客户端身份、四遥协议、未知点告警、决策审计、MMI 单实例持有者诊断与隐藏窗口恢复、自动托管线程、运行日志数据库分页、橙黄色参数脏状态、手动刷新与自动刷新保护、透明跟随曲线游标和三位小数显示。</p>
 
             <h3>版本信息</h3>
             <div class="table-wrap">
@@ -1206,7 +1208,7 @@ python -m compileall -q .</code></pre>
                 <thead><tr><th>项目</th><th>值</th></tr></thead>
                 <tbody>
                   <tr><td>软件包版本</td><td><code>0.1.0</code></td></tr>
-                  <tr><td>文档版本</td><td><code>V1.0</code></td></tr>
+                  <tr><td>文档版本</td><td><code>V1.0 修订 4</code></td></tr>
                   <tr><td>Git 分支</td><td><code>main</code></td></tr>
                   <tr><td>软件基线提交</td><td><code>本手册所在 main 提交；以发布核验的远端 SHA 为准</code></td></tr>
                   <tr><td>远端</td><td><code>git@github.com:jimgreen/power_system_operator.git</code></td></tr>
@@ -1265,7 +1267,7 @@ dev_load.1.p_curr</code></pre>
 
             <h3>C. 上线验收清单</h3>
             <ul class="checklist">
-              <li>只允许一个 MMI 宿主；首实例运行时重复执行启动命令，第二实例必须被操作系统单实例锁拒绝，且不得初始化数据库或创建 Core/IO 线程。</li>
+              <li>只允许一个 MMI 宿主；首实例运行时重复执行启动命令，第二入口不得初始化数据库或创建 Core/IO 线程，必须报告真实 PID、恢复已有窗口并以 0 结束；无法恢复时才以 2 结束并明确诊断。</li>
               <li>MMI、Core、IO 各自使用独立 Engine，但指向同一绝对数据库路径。</li>
               <li>数据库 WAL、busy timeout 和外键已启用。</li>
               <li>设备和四遥定义数量与源系统核对一致。</li>
@@ -1283,7 +1285,7 @@ dev_load.1.p_curr</code></pre>
             </ul>
 
             <div class="footer-note">
-              <strong>文档基线声明：</strong>本手册依据 Power System Operator 软件包 0.1.0、软件基线提交 <span class="mono">ad87b20b2c4338f0d53ce31ba76fe075d36460de</span> 的“单一 MMI 宿主 + Core/IO 两个受管子线程”实现编制。本 HTML 的基线标注更新会形成其后的文档提交；后续数据库、协议、策略或 MMI 行为发生变化时必须同步更新软件基线和文档版本。
+              <strong>文档基线声明：</strong>本手册依据 Power System Operator 软件包 0.1.0 和本手册所在的 <code>main</code> 发布提交编制，覆盖“单一 MMI 宿主 + Core/IO 两个受管子线程”、隐藏窗口自愈、设备级 <code>control_mode</code> 与稳定客户端身份。后续数据库、协议、策略或 MMI 行为发生变化时必须同步更新软件基线和文档版本。
             </div>
           </section>
         </div>

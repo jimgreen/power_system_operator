@@ -1,6 +1,6 @@
 # Power System Operator
 
-这是一个基于 SQLite、SQLAlchemy 2 和 PyQt6 的微电网操作员系统。默认运行形态是一个 `operator_mmi` 宿主进程：入口通过操作系统级原子锁强制单实例，第二次启动会在打开数据库和创建工作线程之前退出；首个 MMI 启动时自动创建 Core、IO 两个受管工作线程，关闭时先停止 IO、再停止 Core 并等待退出。MMI、Core 线程和 IO 线程访问同一个数据库文件，但每个长期工作线程分别创建 SQLAlchemy engine，并始终使用短生命周期 Session。
+这是一个基于 SQLite、SQLAlchemy 2 和 PyQt6 的微电网操作员系统。默认运行形态是一个 `operator_mmi` 宿主进程：入口通过操作系统级原子锁强制单实例，并记录真实持有者 PID、解释器、参数和工作目录；第二次启动会先恢复、置前已有窗口，再在打开数据库和创建工作线程之前以成功状态退出。首个 MMI 启动时自动创建 Core、IO 两个受管工作线程，关闭时先停止 IO、再停止 Core 并等待退出。MMI、Core 线程和 IO 线程访问同一个数据库文件，但每个长期工作线程分别创建 SQLAlchemy engine，并始终使用短生命周期 Session。
 
 工程组成：
 
@@ -61,7 +61,7 @@ python simulator_io_mock.py --host 127.0.0.1 --port 9200
 python operator_mmi.py --db ems_demo.db --simulator-host 127.0.0.1 --simulator-port 9200
 ```
 
-在 MMI 顶部选择开环或闭环，设置数据周期和决策周期；人工修改的控件会变为橙黄色，并且不会被 1 秒自动刷新覆盖。点击“保存参数”提交后，再点击“启动 / 继续”。需要放弃未保存值时，点击“手动刷新参数”并确认后从数据库重载。数据周期和决策周期都按墙钟秒配置；Core 子线程在停止或暂停期间仍每 0.5 秒检查一次控制表，所以不需要重启程序。关闭 MMI 时，IO 和 Core 子线程会自动停止。`--no-workers` 只用于无头截图、测试或维护，不是正常运行方式。
+在 MMI 顶部选择开环或闭环，设置数据周期和决策周期；人工修改的控件会变为橙黄色，并且不会被 1 秒自动刷新覆盖。点击“保存参数”提交后，再点击“启动 / 继续”。需要放弃未保存值时，点击“手动刷新参数”并确认后从数据库重载。数据周期和决策周期都按墙钟秒配置；Core 子线程在停止或暂停期间仍每 0.5 秒检查一次控制表，所以不需要重启程序。关闭 MMI 时，IO 和 Core 子线程会自动停止。`--no-workers` 只用于无头截图、测试或维护，不是正常运行方式。正式运行推荐使用 `pythonw.exe` 或等价的无控制台桌面启动方式，禁止对 MMI 使用 `Start-Process -WindowStyle Hidden`；如果外部启动器误将首窗口隐藏，程序会自动执行原生窗口恢复。再次执行启动命令时，提示中的 PID 是实际持锁进程，已有窗口会被恢复并置前。
 
 一次性运维计算入口：
 
@@ -213,13 +213,14 @@ p_max_curr = calculate_wind_max_power(
 operator_io --TCP client--> simulator_io
 ```
 
-协议使用 UTF-8 JSON Lines，每次连接发送一行请求并接收一行响应，单行上限 2 MiB。
+协议使用 UTF-8 JSON Lines，每次连接发送一行请求并接收一行响应，单行上限 2 MiB。所有发往真实 `simulator_io` 的 read/write/ping 请求都由程序强制携带固定 `client_id="power_system_operator"`；短连接和断线重连保持同一身份，调用者不能用其他 ID 覆盖。模拟器据此把本项目稳定统计为一个最近 10 秒内成功 read/write 的在线业务客户端，而不是按瞬时套接字数计数。
 
 按 `data_period` 发出的数据读取请求：
 
 ```json
 {
   "action": "read",
+  "client_id": "power_system_operator",
   "rtu_id": 1,
   "simu_time": 2,
   "data": {
@@ -277,6 +278,7 @@ Bridge 每 1 秒检查一次变化的 YT/YK，并发送：
 ```json
 {
   "action": "write",
+  "client_id": "power_system_operator",
   "run_seq": 7,
   "data": {
     "yt": [{"pnt_no":200001,"name":"dev_wind_gen.1.p_set","value":62.5,"time":10}],

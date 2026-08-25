@@ -62,7 +62,11 @@ from power_operator.models import (
 )
 from power_operator.plot_widget import CurveSeries, InteractivePlot
 from power_operator.runtime_threads import OperatorRuntimeThreads
-from power_operator.single_instance import SingleInstanceGuard
+from power_operator.single_instance import (
+    SingleInstanceGuard,
+    activate_existing_instance,
+    ensure_window_visible,
+)
 from power_operator.time_utils import (
     format_float,
     format_simu_time,
@@ -1611,11 +1615,23 @@ def main() -> None:
     args = parser.parse_args()
     instance_guard = SingleInstanceGuard()
     if not instance_guard.acquire():
+        owner_reader = getattr(instance_guard, "existing_owner", None)
+        owner = owner_reader() if callable(owner_reader) else None
+        activated = bool(owner and activate_existing_instance(owner.pid))
+        owner_text = f"（PID {owner.pid}）" if owner is not None else ""
+        recovery_text = (
+            "，已恢复并显示现有窗口"
+            if activated
+            else "；现有实例可能仍在启动或没有可见窗口"
+        )
         print(
-            "operator_mmi 已经在运行，禁止重复启动第二个实例。",
+            f"operator_mmi 已经在运行{owner_text}{recovery_text}，"
+            "禁止重复启动第二个实例。",
             file=sys.stderr,
             flush=True,
         )
+        if activated:
+            return
         raise SystemExit(2)
 
     database = None
@@ -1641,7 +1657,9 @@ def main() -> None:
                 stop_timeout=max(0.1, args.worker_stop_timeout),
             )
         window = OperatorMainWindow(database, runtime=runtime)
-        window.show()
+        if not ensure_window_visible(window):
+            LOGGER.warning("MMI 原生窗口暂未可见，将在事件循环启动后再次恢复")
+        QTimer.singleShot(250, lambda: ensure_window_visible(window))
         exit_code = application.exec()
     finally:
         if runtime is not None:

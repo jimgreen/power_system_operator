@@ -34,6 +34,7 @@ from .retired_measurements import (
 
 LOGGER = logging.getLogger(__name__)
 LOG_WARNING = 2
+SIMULATOR_CLIENT_ID = "power_system_operator"
 
 _SCADA_SIGNAL_NAMES = {
     ScadaYc: "YC",
@@ -362,7 +363,12 @@ class SimulatorIoClient:
         self.timeout = timeout
 
     def exchange(self, request: dict[str, Any]) -> dict[str, Any]:
-        payload = json.dumps(request, ensure_ascii=False).encode("utf-8") + b"\n"
+        identified_request = dict(request)
+        identified_request["client_id"] = SIMULATOR_CLIENT_ID
+        payload = (
+            json.dumps(identified_request, ensure_ascii=False).encode("utf-8")
+            + b"\n"
+        )
         with socket.create_connection((self.host, self.port), timeout=self.timeout) as connection:
             connection.sendall(payload)
             response_file = connection.makefile("rb")
@@ -519,6 +525,7 @@ class OperatorIoBridge:
         response = self.transport(
             {
                 "action": "read",
+                "client_id": SIMULATOR_CLIENT_ID,
                 "rtu_id": self.rtu_id,
                 "simu_time": requested_time,
                 "data": {"yc": requested_yc, "yx": requested_yx},
@@ -786,6 +793,7 @@ class OperatorIoBridge:
         response = self.transport(
             {
                 "action": "write",
+                "client_id": SIMULATOR_CLIENT_ID,
                 "run_seq": source_run_seq,
                 "data": {
                     "yt": [self._point_payload(row) for row in yt_rows],
