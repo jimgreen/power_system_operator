@@ -871,6 +871,12 @@ def test_real_tcp_bridge_connection_switch_and_yk_status_filter(tmp_path):
         control.source_runtime_ready = 1
         session.add_all(
             [
+                DevWindGen(
+                    id=1,
+                    name="风力发电机1",
+                    status=0,
+                    control_mode=1,
+                ),
                 ScadaRtu(
                     id=7,
                     ip="127.0.0.1",

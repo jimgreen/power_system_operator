@@ -5,6 +5,7 @@ import json
 from power_operator.database import Database, initialize_database
 from power_operator.io_service import apply_rtu_request, update_existing_scada_points
 from power_operator.models import (
+    DevWindGen,
     OperatorControl,
     OperatorLog,
     ScadaRtu,
@@ -20,6 +21,14 @@ def test_rtu_exchange_updates_measurements_and_returns_changed_controls(tmp_path
     initialize_database(db)
     db.write(
         lambda session: (
+            session.add(
+                DevWindGen(
+                    id=1,
+                    name="风力发电机1",
+                    status=0,
+                    control_mode=1,
+                )
+            ),
             session.add(
                 ScadaYc(
                     pnt_no=101,
@@ -110,9 +119,20 @@ def test_rtu_exchange_ignores_zero_time_measurements_and_never_returns_zero_time
     db.write(
         lambda session: session.add_all(
             [
+                DevWindGen(
+                    id=1,
+                    name="风力发电机1",
+                    status=0,
+                    control_mode=1,
+                ),
                 ScadaYx(pnt_no=4, name="valid.yx", value=0, time=1),
                 ScadaYt(pnt_no=1, name="zero.yt", value=10.0, time=0),
-                ScadaYt(pnt_no=2, name="valid.yt", value=20.0, time=1),
+                ScadaYt(
+                    pnt_no=2,
+                    name="dev_wind_gen.1.p_set",
+                    value=20.0,
+                    time=1,
+                ),
                 ScadaYt(
                     pnt_no=5,
                     name="风力发电机1.偏航角设定",
@@ -126,7 +146,12 @@ def test_rtu_exchange_ignores_zero_time_measurements_and_never_returns_zero_time
                     time=1,
                 ),
                 ScadaYk(pnt_no=3, name="zero.yk", value=1, time=0),
-                ScadaYk(pnt_no=4, name="valid.yk", value=1, time=1),
+                ScadaYk(
+                    pnt_no=4,
+                    name="dev_wind_gen.1.status",
+                    value=1,
+                    time=1,
+                ),
             ]
         )
     )

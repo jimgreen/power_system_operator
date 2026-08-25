@@ -121,6 +121,58 @@ def find_device_for_predefined_status_point(
     return command_matches[0] if len(command_matches) == 1 else None
 
 
+def find_device_for_predefined_control_mode_point(
+    session: Session,
+    point: ScadaYx,
+):
+    """Resolve a simulator ``<device>.控制模式`` YX to a controllable device."""
+
+    point_name = _normalized(point.name)
+    matches = [
+        device
+        for table_name, model in _DEVICE_MODELS.items()
+        if table_name != "dev_load"
+        for device in session.scalars(select(model).order_by(model.id)).all()
+        if str(device.name).strip()
+        and point_name == _normalized(f"{device.name}.控制模式")
+    ]
+    if len(matches) == 1:
+        return matches[0]
+
+    point_number = int(point.pnt_no)
+    if point_number <= 0 or point_number % 100 != 2:
+        return None
+    device_id = point_number // 100
+    id_matches = [
+        session.get(model, device_id)
+        for table_name, model in _DEVICE_MODELS.items()
+        if table_name != "dev_load"
+    ]
+    id_matches = [device for device in id_matches if device is not None]
+    return id_matches[0] if len(id_matches) == 1 else None
+
+
+def find_device_for_command_point(session: Session, point, model):
+    """Resolve an existing YT/YK definition back to its controllable device."""
+
+    raw_name = str(point.name).strip()
+    legacy_pattern = _LEGACY_YT_RE if model is ScadaYt else _LEGACY_YK_RE
+    legacy_match = legacy_pattern.fullmatch(raw_name)
+    if legacy_match is not None:
+        table_name = legacy_match.group(1).lower()
+        return session.get(_DEVICE_MODELS[table_name], int(legacy_match.group(2)))
+
+    normalized_name = _normalized(raw_name)
+    matches = [
+        device
+        for table_name, device_model in _DEVICE_MODELS.items()
+        if table_name != "dev_load"
+        for device in session.scalars(select(device_model).order_by(device_model.id)).all()
+        if normalized_name in predefined_command_names(table_name, device, model)
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
 def migrate_legacy_generated_command_points(session: Session) -> dict[str, int]:
     """Move old auto-generated commands to existing definitions, then remove them.
 

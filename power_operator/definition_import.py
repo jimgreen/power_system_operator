@@ -41,6 +41,16 @@ DEFINITION_MODELS = (
     DevLoad,
 )
 
+OPTIONAL_SOURCE_DEFAULTS: dict[str, dict[str, object]] = {
+    table_name: {"control_mode": 1}
+    for table_name in (
+        "dev_diesal_gen",
+        "dev_wind_gen",
+        "dev_solar_gen",
+        "dev_estore",
+    )
+}
+
 
 @dataclass(frozen=True, slots=True)
 class TableImportReport:
@@ -105,7 +115,12 @@ def _read_source_rows(
                 for row in connection.execute(f'PRAGMA table_info("{table_name}")')
             ]
             target_columns = [column.name for column in model.__table__.columns]
-            missing = [column for column in target_columns if column not in source_columns]
+            source_defaults = OPTIONAL_SOURCE_DEFAULTS.get(table_name, {})
+            missing = [
+                column
+                for column in target_columns
+                if column not in source_columns and column not in source_defaults
+            ]
             if missing:
                 raise ValueError(
                     f"源表 {table_name} 缺少目标必需列: {', '.join(missing)}"
@@ -113,7 +128,12 @@ def _read_source_rows(
             ignored[table_name] = tuple(
                 column for column in source_columns if column not in target_columns
             )
-            projection = ", ".join(f'"{column}"' for column in target_columns)
+            projection = ", ".join(
+                f'"{column}"'
+                if column in source_columns
+                else f'{int(source_defaults[column])} AS "{column}"'
+                for column in target_columns
+            )
             order_by = ", ".join(
                 f'"{column.name}"' for column in model.__table__.primary_key.columns
             )

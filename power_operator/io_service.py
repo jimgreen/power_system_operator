@@ -10,6 +10,7 @@ from typing import Any, Callable, Protocol
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from .command_points import find_device_for_command_point
 from .database import Database
 from .models import (
     OperatorControl,
@@ -285,11 +286,25 @@ def apply_rtu_request(database: Database, request: dict[str, Any], now: int | No
                 .order_by(ScadaYt.time, ScadaYt.pnt_no)
             ).all()
             if not is_retired_wind_angle_setpoint_name(row.name)
+            and (
+                (device := find_device_for_command_point(session, row, ScadaYt))
+                is not None
+                and int(device.control_mode) == 1
+            )
         ]
         yk_candidates = session.scalars(
             select(ScadaYk).where(ScadaYk.time > last_yk_time).order_by(ScadaYk.time, ScadaYk.pnt_no)
         ).all()
-        yk_rows = [row for row in yk_candidates if yk_requires_status_change(session, row)]
+        yk_rows = [
+            row
+            for row in yk_candidates
+            if (
+                (device := find_device_for_command_point(session, row, ScadaYk))
+                is not None
+                and int(device.control_mode) == 1
+                and yk_requires_status_change(session, row)
+            )
+        ]
         return {
             "ok": True,
             "server_time": wall_time,
@@ -737,6 +752,11 @@ class OperatorIoBridge:
                 row
                 for row in yt_candidates
                 if not is_retired_wind_angle_setpoint_name(row.name)
+                and (
+                    (device := find_device_for_command_point(session, row, ScadaYt))
+                    is not None
+                    and int(device.control_mode) == 1
+                )
             ]
             yk_candidates = session.scalars(
                 select(ScadaYk)
@@ -744,7 +764,14 @@ class OperatorIoBridge:
                 .order_by(ScadaYk.time, ScadaYk.pnt_no)
             ).all()
             yk_rows = [
-                row for row in yk_candidates if yk_requires_status_change(session, row)
+                row
+                for row in yk_candidates
+                if (
+                    (device := find_device_for_command_point(session, row, ScadaYk))
+                    is not None
+                    and int(device.control_mode) == 1
+                    and yk_requires_status_change(session, row)
+                )
             ]
             latest_checked_yk_time = max(
                 [self._last_yk_time, *[int(row.time) for row in yk_candidates]]

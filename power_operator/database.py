@@ -93,8 +93,17 @@ class Database:
 
 
 def initialize_database(database: Database) -> None:
-    _migrate_existing_schema(database)
+    migrated_control_mode_tables = _migrate_existing_schema(database)
     Base.metadata.create_all(database.engine)
+    if migrated_control_mode_tables:
+        with database.engine.begin() as connection:
+            for table_name in migrated_control_mode_tables:
+                connection.exec_driver_sql(
+                    'INSERT OR IGNORE INTO "scada_yx"'
+                    '("pnt_no", "name", "value", "time") '
+                    f'SELECT "id" * 100 + 2, "name" || \'.控制模式\', '
+                    f'"control_mode", 0 FROM "{table_name}"'
+                )
     # ``create_all`` does not add newly introduced indexes to tables that
     # already existed. Explicit checkfirst calls make init_db an idempotent
     # lightweight schema upgrade for ORM-declared indexes.
@@ -123,7 +132,7 @@ def initialize_database(database: Database) -> None:
     database.write(seed)
 
 
-def _migrate_existing_schema(database: Database) -> None:
+def _migrate_existing_schema(database: Database) -> tuple[str, ...]:
     """Apply small, idempotent SQLite migrations needed by existing ems.db files."""
 
     schema = inspect(database.engine)
@@ -190,6 +199,26 @@ def _migrate_existing_schema(database: Database) -> None:
                 connection.exec_driver_sql(
                     'ALTER TABLE "dev_estore" DROP COLUMN "soc_init"'
                 )
+    migrated_control_mode_tables: list[str] = []
+    for table_name in (
+        "dev_diesal_gen",
+        "dev_wind_gen",
+        "dev_solar_gen",
+        "dev_estore",
+    ):
+        if table_name not in tables:
+            continue
+        device_columns = {
+            column["name"]
+            for column in inspect(database.engine).get_columns(table_name)
+        }
+        if "control_mode" not in device_columns:
+            with database.engine.begin() as connection:
+                connection.exec_driver_sql(
+                    f'ALTER TABLE "{table_name}" ADD COLUMN "control_mode" '
+                    "INTEGER NOT NULL DEFAULT 1"
+                )
+            migrated_control_mode_tables.append(table_name)
     if "operator_control" in tables:
         columns = [column["name"] for column in schema.get_columns("operator_control")]
         additions = {
@@ -408,3 +437,5 @@ def _migrate_existing_schema(database: Database) -> None:
                 connection.exec_driver_sql(
                     f'ALTER TABLE "{table_name}" RENAME COLUMN "simu_time" TO "time"'
                 )
+
+    return tuple(migrated_control_mode_tables)

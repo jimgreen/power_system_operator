@@ -8,7 +8,6 @@ from power_operator.core import (
     CONTROL_CLOSED,
     CONTROL_OPEN,
     OPER_RUNNING,
-    OPER_STOPPED,
     OperatorCore,
 )
 from power_operator.database import Database, initialize_database
@@ -151,6 +150,111 @@ def test_valid_predefined_yx_updates_every_device_status_in_real_time(tmp_path):
         assert session.get(DevSolarGen, 3001).status == 1
         assert session.get(DevLoad, 4001).status == 0
         assert session.get(DevEstore, 5001).status == 1
+
+
+def test_valid_control_mode_yx_updates_all_controllable_devices(tmp_path):
+    database = Database(tmp_path / "ems.db")
+    initialize_database(database)
+
+    def seed(session):
+        session.add_all(
+            [
+                DevDiesalGen(id=1001, name="柴油发电机1", control_mode=1),
+                DevWindGen(id=2001, name="风力发电机1", control_mode=1),
+                DevSolarGen(id=3001, name="光伏发电单元1", control_mode=1),
+                DevEstore(id=5001, name="储能单元1", control_mode=1),
+                ScadaYx(pnt_no=100102, name="柴油发电机1.控制模式", value=0, time=10),
+                ScadaYx(pnt_no=200102, name="风力发电机1.控制模式", value=0, time=10),
+                ScadaYx(pnt_no=300102, name="光伏发电单元1.控制模式", value=0, time=10),
+                ScadaYx(pnt_no=500102, name="储能单元1.控制模式", value=0, time=10),
+            ]
+        )
+
+    database.write(seed)
+    OperatorCore(database).process_data_refresh(current_time=10, wall_time=100)
+
+    with database.session() as session:
+        assert session.get(DevDiesalGen, 1001).control_mode == 0
+        assert session.get(DevWindGen, 2001).control_mode == 0
+        assert session.get(DevSolarGen, 3001).control_mode == 0
+        assert session.get(DevEstore, 5001).control_mode == 0
+
+
+def test_closed_operator_controls_only_closed_devices_and_accounts_for_open_power(
+    tmp_path,
+):
+    database = Database(tmp_path / "ems.db")
+    initialize_database(database)
+
+    def seed(session):
+        session.add_all(
+            [
+                DevDiesalGen(
+                    id=1,
+                    name="开环柴发",
+                    p_rated=100,
+                    p_max=100,
+                    p_min=0,
+                    status=1,
+                    p_curr=30,
+                    p_set=10,
+                    control_mode=0,
+                ),
+                DevDiesalGen(
+                    id=2,
+                    name="闭环柴发",
+                    p_rated=100,
+                    p_max=100,
+                    p_min=0,
+                    status=1,
+                    p_curr=0,
+                    p_set=0,
+                    control_mode=1,
+                ),
+                DevWindGen(
+                    id=3,
+                    name="停机开环风机",
+                    status=0,
+                    p_curr=900,
+                    control_mode=0,
+                ),
+                DevLoad(id=1, name="负荷", status=1, p_curr=100),
+                ScadaYt(pnt_no=100101, name="开环柴发.有功出力设定", value=88, time=9),
+                ScadaYt(pnt_no=100201, name="闭环柴发.有功出力设定", value=0, time=0),
+                ScadaYk(pnt_no=100101, name="开环柴发.启停命令", value=1, time=9),
+                ScadaYk(pnt_no=100201, name="闭环柴发.启停命令", value=1, time=0),
+            ]
+        )
+        control = session.get(OperatorControl, 1)
+        control.oper_status = OPER_RUNNING
+        control.control_status = CONTROL_CLOSED
+        control.oper_period = 10
+
+    database.write(seed)
+    OperatorCore(database).run_decision(10, wall_time=100)
+
+    with database.session() as session:
+        open_device = session.get(DevDiesalGen, 1)
+        closed_device = session.get(DevDiesalGen, 2)
+        open_yt = session.get(ScadaYt, 100101)
+        open_yk = session.get(ScadaYk, 100101)
+        closed_yt = session.get(ScadaYt, 100201)
+        audit = json.loads(
+            session.scalars(
+                select(OperatorLog).where(OperatorLog.log_type == 4)
+            ).one().log_info
+        )
+
+    assert (open_device.p_set, open_yt.time, open_yk.time) == (30, 0, 0)
+    assert (closed_device.p_set, closed_yt.value, closed_yt.time) == (70, 70, 10)
+    assert audit["inputs"]["totals"]["open_loop_fixed_power_kw"] == 30
+    open_output = next(
+        row
+        for row in audit["outputs"]["devices"]
+        if row["table"] == "dev_diesal_gen" and row["id"] == 1
+    )
+    assert open_output["control_mode"] == 0
+    assert open_output["yt"]["reason"] == "device_open_loop"
 
 
 def test_predefined_yx_can_use_same_point_yk_to_identify_device(tmp_path):

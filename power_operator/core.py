@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from .database import Database
 from .command_points import (
+    find_device_for_predefined_control_mode_point,
     find_device_for_predefined_status_point,
     find_predefined_command_point,
 )
@@ -94,7 +95,7 @@ YC_FIELDS = {
     "angle_pitch_curr",
     "soc_curr",
 }
-YX_FIELDS = {"status"}
+YX_FIELDS = {"status", "control_mode"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,26 +182,41 @@ def _update_device_measurements(
             )
     for _rank, device, field_name, value in measurement_updates.values():
         setattr(device, field_name, float(value))
-    status_updates = {}
+    yx_updates = {}
     for point in yx_points:
         if int(point.time) <= 0:
             continue
         match = DEVICE_NAME_RE.fullmatch(point.name.strip().lower())
         device = None
+        field_name = None
         if match is not None and match.group(3) in YX_FIELDS:
             model = DEVICE_BY_TABLE[match.group(1)]
             device = session.get(model, int(match.group(2)))
+            field_name = match.group(3)
         elif match is None:
-            device = find_device_for_predefined_status_point(session, point)
-        if device is None:
+            device = find_device_for_predefined_control_mode_point(session, point)
+            if device is not None:
+                field_name = "control_mode"
+            else:
+                device = find_device_for_predefined_status_point(session, point)
+                field_name = "status" if device is not None else None
+        if device is None or field_name is None or not hasattr(device, field_name):
             continue
-        device_key = (type(device), int(device.id))
+        device_key = (type(device), int(device.id), field_name)
         candidate_rank = (int(point.time), int(point.pnt_no))
-        current = status_updates.get(device_key)
+        current = yx_updates.get(device_key)
         if current is None or candidate_rank > current[0]:
-            status_updates[device_key] = (candidate_rank, device, point.value)
-    for _rank, device, value in status_updates.values():
-        device.status = 1 if int(value) != 0 else 0
+            yx_updates[device_key] = (
+                candidate_rank,
+                device,
+                field_name,
+                point.value,
+            )
+    for _rank, device, field_name, value in yx_updates.values():
+        if field_name == "control_mode":
+            device.control_mode = 1 if int(value) == 1 else 0
+        else:
+            device.status = 1 if int(value) != 0 else 0
 
 
 def _storage_power_limits(device: DevEstore, period_seconds: int) -> tuple[float, float]:
@@ -479,27 +495,34 @@ class OperatorCore:
             for device in stores:
                 charge_limit, discharge_limit = _storage_power_limits(device, period)
                 storage_limits[int(device.id)] = (charge_limit, discharge_limit)
-                if device.status:
+                if device.status and int(device.control_mode) == 1:
                     charge_units.append(DispatchUnit(device.id, 0.0, charge_limit))
                     discharge_units.append(DispatchUnit(device.id, 0.0, discharge_limit))
             load_kw = sum(max(0.0, row.p_curr) for row in loads if row.status)
+            open_loop_power_kw = sum(
+                float(row.p_curr)
+                for rows in (diesels, winds, solars, stores)
+                for row in rows
+                if int(row.control_mode) == 0 and int(row.status) == 1
+            )
+            controllable_load_kw = load_kw - open_loop_power_kw
             dispatch = calculate_dispatch(
                 DispatchInput(
-                    load_kw=load_kw,
+                    load_kw=controllable_load_kw,
                     wind=[
                         DispatchUnit(row.id, 0.0, row.p_max_curr)
                         for row in winds
-                        if row.status
+                        if row.status and int(row.control_mode) == 1
                     ],
                     solar=[
                         DispatchUnit(row.id, 0.0, row.p_max_curr)
                         for row in solars
-                        if row.status
+                        if row.status and int(row.control_mode) == 1
                     ],
                     diesel=[
                         DispatchUnit(row.id, row.p_min, row.p_max)
                         for row in diesels
-                        if row.status
+                        if row.status and int(row.control_mode) == 1
                     ],
                     storage_charge=charge_units,
                     storage_discharge=discharge_units,
@@ -508,14 +531,26 @@ class OperatorCore:
             closed_loop = int(control.control_status) == CONTROL_CLOSED
 
             def input_state(row, fields: tuple[str, ...]) -> dict:
-                included = bool(int(row.status))
+                controllable = (
+                    not hasattr(row, "control_mode")
+                    or int(row.control_mode) == 1
+                )
+                included = bool(int(row.status)) and controllable
                 result = {
                     "id": int(row.id),
                     "name": str(row.name),
                     "status": int(row.status),
                     "included": included,
-                    "excluded_reason": "" if included else "status_stopped",
+                    "excluded_reason": (
+                        ""
+                        if included
+                        else "device_open_loop"
+                        if not controllable
+                        else "status_stopped"
+                    ),
                 }
+                if hasattr(row, "control_mode"):
+                    result["control_mode"] = int(row.control_mode)
                 for field in fields:
                     result[field] = float(getattr(row, field))
                 return result
@@ -612,7 +647,12 @@ class OperatorCore:
 
             def apply_setpoint(row, table_name: str, values: dict[int, float]) -> None:
                 old_setpoint = float(row.p_set)
-                new_setpoint = float(values.get(int(row.id), 0.0))
+                device_closed_loop = int(row.control_mode) == 1
+                new_setpoint = (
+                    float(values.get(int(row.id), 0.0))
+                    if device_closed_loop
+                    else float(row.p_curr)
+                )
                 row.p_set = new_setpoint
                 yt_point = find_predefined_command_point(
                     session, ScadaYt, table_name, row
@@ -631,7 +671,8 @@ class OperatorCore:
                     else int(row.status)
                 )
                 target_status = int(row.status)
-                if closed_loop:
+                command_enabled = closed_loop and device_closed_loop
+                if command_enabled:
                     yt_generated, yt_value_changed = _set_command_point(
                         yt_point, new_setpoint, current_time
                     )
@@ -664,17 +705,27 @@ class OperatorCore:
                         else "status_changed" if yk_generated else "status_unchanged"
                     )
                 else:
+                    if not device_closed_loop:
+                        if yt_point is not None:
+                            yt_point.time = 0
+                        if yk_point is not None:
+                            yk_point.time = 0
                     yt_generated = False
                     yt_value_changed = False
                     yk_generated = False
                     yt_time = 0
-                    yt_reason = "open_loop"
-                    yk_reason = "open_loop"
+                    yt_reason = (
+                        "device_open_loop"
+                        if not device_closed_loop
+                        else "open_loop"
+                    )
+                    yk_reason = yt_reason
                 outputs.append(
                     {
                         "table": table_name,
                         "id": int(row.id),
                         "name": str(row.name),
+                        "control_mode": int(row.control_mode),
                         "current_status": current_status,
                         "target_status": target_status,
                         "p_curr": float(row.p_curr),
@@ -828,11 +879,17 @@ class OperatorCore:
                     },
                     "totals": {
                         "load_kw": float(load_kw),
+                        "open_loop_fixed_power_kw": float(open_loop_power_kw),
+                        "controllable_load_kw": float(controllable_load_kw),
                         "wind_available_kw": sum(
-                            max(0.0, float(row.p_max_curr)) for row in winds if row.status
+                            max(0.0, float(row.p_max_curr))
+                            for row in winds
+                            if row.status and int(row.control_mode) == 1
                         ),
                         "solar_available_kw": sum(
-                            max(0.0, float(row.p_max_curr)) for row in solars if row.status
+                            max(0.0, float(row.p_max_curr))
+                            for row in solars
+                            if row.status and int(row.control_mode) == 1
                         ),
                     },
                     "devices": device_inputs,

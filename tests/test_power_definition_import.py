@@ -226,6 +226,43 @@ def test_import_missing_required_column_fails_before_target_changes(tmp_path):
         assert existing.p_curr == 3
 
 
+def test_import_legacy_devices_without_control_mode_defaults_to_closed_loop(
+    tmp_path,
+):
+    source_path = tmp_path / "legacy_power.db"
+    target_path = tmp_path / "ems.db"
+    _build_source(source_path)
+    connection = sqlite3.connect(source_path)
+    try:
+        for table_name in (
+            "dev_diesal_gen",
+            "dev_wind_gen",
+            "dev_solar_gen",
+            "dev_estore",
+        ):
+            connection.execute(
+                f'ALTER TABLE "{table_name}" DROP COLUMN control_mode'
+            )
+        connection.commit()
+    finally:
+        connection.close()
+
+    import_power_definitions(source_path, target_path, replace=True)
+
+    target = Database(target_path)
+    try:
+        with target.session() as session:
+            for model in (
+                DevDiesalGen,
+                DevWindGen,
+                DevSolarGen,
+                DevEstore,
+            ):
+                assert session.scalars(select(model)).one().control_mode == 1
+    finally:
+        target.dispose()
+
+
 def test_import_succeeds_when_windows_sharing_prevents_direct_source_hash(
     tmp_path,
     monkeypatch,

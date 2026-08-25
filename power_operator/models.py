@@ -68,6 +68,7 @@ class DevDiesalGen(Base):
     status: Mapped[int] = mapped_column(Integer, default=0)
     p_curr: Mapped[float] = mapped_column(Float, default=0.0)
     p_set: Mapped[float] = mapped_column(Float, default=0.0)
+    control_mode: Mapped[int] = mapped_column(Integer, default=1)
 
 
 class DevWindGen(Base):
@@ -84,6 +85,7 @@ class DevWindGen(Base):
     angle_pitch_curr: Mapped[float] = mapped_column(Float, default=0.0)
     p_curr: Mapped[float] = mapped_column(Float, default=0.0)
     p_set: Mapped[float] = mapped_column(Float, default=0.0)
+    control_mode: Mapped[int] = mapped_column(Integer, default=1)
 
 
 class DevSolarGen(Base):
@@ -96,6 +98,7 @@ class DevSolarGen(Base):
     p_max_curr: Mapped[float] = mapped_column(Float, default=0.0)
     p_curr: Mapped[float] = mapped_column(Float, default=0.0)
     p_set: Mapped[float] = mapped_column(Float, default=0.0)
+    control_mode: Mapped[int] = mapped_column(Integer, default=1)
 
 
 class DevEstore(Base):
@@ -115,6 +118,7 @@ class DevEstore(Base):
     soc_curr: Mapped[float] = mapped_column(Float, default=0.0)
     soc_max: Mapped[float] = mapped_column(Float, default=1.0)
     soc_min: Mapped[float] = mapped_column(Float, default=0.0)
+    control_mode: Mapped[int] = mapped_column(Integer, default=1)
 
 
 class DevLoad(Base):

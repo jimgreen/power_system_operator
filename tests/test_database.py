@@ -37,6 +37,16 @@ def test_initialize_database_builds_required_schema(tmp_path):
     assert "curve_def" not in set(inspect(db.engine).get_table_names())
     columns = {column["name"] for column in inspect(db.engine).get_columns("dev_estore")}
     assert "battery_capacity" in columns
+    for table_name in (
+        "dev_diesal_gen",
+        "dev_wind_gen",
+        "dev_solar_gen",
+        "dev_estore",
+    ):
+        assert "control_mode" in {
+            column["name"]
+            for column in inspect(db.engine).get_columns(table_name)
+        }
     wind_columns = {
         column["name"] for column in inspect(db.engine).get_columns("dev_wind_gen")
     }
@@ -127,7 +137,50 @@ def test_fresh_wind_schema_excludes_removed_yaw_field(tmp_path):
         "angle_pitch_curr",
         "p_curr",
         "p_set",
+        "control_mode",
     ]
+
+
+def test_initialize_database_adds_closed_loop_mode_to_legacy_device_rows(tmp_path):
+    path = tmp_path / "ems.db"
+    import sqlite3
+
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        """
+        CREATE TABLE dev_diesal_gen (
+            id INTEGER NOT NULL PRIMARY KEY,
+            name TEXT NOT NULL,
+            p_rated FLOAT NOT NULL,
+            p_max FLOAT NOT NULL,
+            p_min FLOAT NOT NULL,
+            p_coeff FLOAT NOT NULL,
+            status INTEGER NOT NULL,
+            p_curr FLOAT NOT NULL,
+            p_set FLOAT NOT NULL
+        );
+        INSERT INTO dev_diesal_gen VALUES
+            (1001, '旧柴发', 100, 100, 0, 0.25, 1, 20, 30);
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    database = Database(path)
+    initialize_database(database)
+
+    with database.engine.connect() as sql:
+        assert sql.execute(
+            text("SELECT control_mode FROM dev_diesal_gen WHERE id=1001")
+        ).scalar_one() == 1
+        assert tuple(
+            sql.execute(
+                text(
+                    "SELECT name, value, time FROM scada_yx "
+                    "WHERE pnt_no=100102"
+                )
+            ).one()
+        ) == ("旧柴发.控制模式", 1, 0)
 
 
 def test_initialize_database_restores_missing_declared_index(tmp_path):
@@ -459,6 +512,7 @@ def test_initialize_database_drops_legacy_wind_yaw_without_losing_device(tmp_pat
         "angle_pitch_curr",
         "p_curr",
         "p_set",
+        "control_mode",
     ]
     with database.engine.connect() as connection:
         row = connection.execute(

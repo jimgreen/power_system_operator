@@ -572,7 +572,7 @@
                 <thead><tr><th>缩写</th><th>名称</th><th>本系统含义</th></tr></thead>
                 <tbody>
                   <tr><td>YC</td><td>遥测</td><td>浮点量测，例如功率、SOC、风速、辐照和温度。</td></tr>
-                  <tr><td>YX</td><td>遥信</td><td>整数状态量，例如设备运行/停止状态。</td></tr>
+                  <tr><td>YX</td><td>遥信</td><td>整数状态量，例如设备运行/停止状态和设备控制模式。</td></tr>
                   <tr><td>YT</td><td>遥调</td><td>浮点控制设定，例如有功功率设定值。</td></tr>
                   <tr><td>YK</td><td>遥控</td><td>整数控制命令，例如启停目标状态。</td></tr>
                   <tr><td>RTU</td><td>远方终端</td><td>记录外部通信端点、连接结果和最近成功交换墙钟。</td></tr>
@@ -940,8 +940,9 @@ p_max = calculate_wind_max_power(
 
             <h3>开环与闭环</h3>
             <div class="two-col">
-              <div class="card"><h4>开环（0）</h4><p>策略照常计算并更新设备表 <code>p_set</code>，但不写入或下发 YT/YK。用于观察策略结果而不影响外部模拟器。</p></div>
-              <div class="card"><h4>闭环（1）</h4><p>除更新设备设定外，还将结果写入预定义 YT；仅在目标启停状态与实际状态不一致时生成有效 YK。</p></div>
+              <div class="card"><h4>全局开环（0）</h4><p>不生成或下发任何设备 YT/YK，用于观察实时数据而不影响外部模拟器。</p></div>
+              <div class="card"><h4>全局闭环（1）</h4><p>仍需设备实时 <code>control_mode=1</code> 才能进入 EMS 可控集合并生成命令；设备开环时按实时 <code>p_curr</code> 作为固定贡献。</p></div>
+              <div class="callout"><strong>双重门控：</strong>Core 从 YX 属性 2 更新设备模式。只有“全局闭环 + 设备闭环”才生成和发送 YT/YK；设备切开环时清除遗留命令时标，IO 边界还会二次过滤。停机开环设备不计入固定功率贡献。</div>
             </div>
           </section>
 
@@ -1179,7 +1180,7 @@ p_max = calculate_wind_max_power(
                   <tr><td>风机理论最大值异常</td><td>有效风速、<code>p_rated/wind_in/wind_rated/wind_cut</code>、风机状态</td><td><code>p_max_curr</code> 由本地函数计算，模拟器同名理论最大 YC 不会覆盖。</td></tr>
                   <tr><td>负荷曲线是直线</td><td>负荷 YC 源数据是否变化</td><td>主页只是绘制历史；若 <code>dev_load.p_curr</code> 的来源 YC 恒定，曲线自然为直线。</td></tr>
                   <tr><td>决策没有严格按 5 秒发生</td><td><code>oper_period</code>、是否有新数据、单调墙钟</td><td>决策既要求墙钟周期到达，也要求存在新数据；运行时刻跳跃不会触发补跑。</td></tr>
-                  <tr><td>闭环 YT 未发送</td><td>闭环状态、预定义 YT、<code>time&gt;0</code>、IO 发送游标和对端响应</td><td>确认点表存在且对端返回 <code>ok=true</code>；失败时游标不会推进。</td></tr>
+                  <tr><td>闭环 YT 未发送</td><td>全局闭环、设备模式 YX 属性 2、预定义 YT、<code>time&gt;0</code>、IO 发送游标和对端响应</td><td>必须同时满足全局闭环和设备 <code>control_mode=1</code>；设备开环会以 <code>device_open_loop</code> 抑制命令。</td></tr>
                   <tr><td>YK 未生成</td><td>目标状态与实时 YX/设备状态是否一致</td><td>状态一致时不应生成冗余 YK；状态未知时也不下发。</td></tr>
                   <tr><td>收到未知点号告警</td><td>模拟器请求/响应点表与 EMS 预定义点表</td><td>核对点号和点名；运行期不会自动创建未知点，避免错误扩展定义。</td></tr>
                   <tr><td>database is locked</td><td>外部数据库浏览器、长事务、多实例、WAL 配置</td><td>关闭长时间持锁程序；确保每进程独立 Engine；不要在网络调用期间持有写事务。</td></tr>

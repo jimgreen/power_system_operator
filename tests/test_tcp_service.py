@@ -4,7 +4,7 @@ import threading
 
 from power_operator.database import Database, initialize_database
 from power_operator.io_service import ThreadingRtuServer
-from power_operator.models import ScadaYc, ScadaYt
+from power_operator.models import DevWindGen, ScadaYc, ScadaYt
 from rtu_client import exchange
 
 
@@ -14,9 +14,20 @@ def test_tcp_json_line_round_trip(tmp_path):
     db.write(
         lambda session: session.add_all(
             [
+                DevWindGen(
+                    id=1,
+                    name="风力发电机1",
+                    status=1,
+                    control_mode=1,
+                ),
                 ScadaYc(pnt_no=1, name="simu.wind", value=0.0, time=0),
                 ScadaYt(pnt_no=10, name="invalid.yt", value=99.0, time=0),
-                ScadaYt(pnt_no=11, name="valid.yt", value=12.0, time=1),
+                ScadaYt(
+                    pnt_no=11,
+                    name="dev_wind_gen.1.p_set",
+                    value=12.0,
+                    time=1,
+                ),
             ]
         )
     )
