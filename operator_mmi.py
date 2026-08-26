@@ -36,7 +36,6 @@ from power_operator.core import (
     LOG_ERROR,
     LOG_INFO,
     LOG_WARNING,
-    OPER_PAUSED,
     OPER_RUNNING,
     OPER_STOPPED,
 )
@@ -61,7 +60,7 @@ from power_operator.models import (
     OperatorLog,
 )
 from power_operator.plot_widget import CurveSeries, InteractivePlot
-from power_operator.runtime_threads import OperatorRuntimeThreads
+from power_operator.runtime_processes import OperatorProcessRuntime
 from power_operator.single_instance import (
     SingleInstanceGuard,
     activate_existing_instance,
@@ -78,7 +77,7 @@ from operator_mmi_qt import Ui_OperatorMainWindow
 
 LOGGER = logging.getLogger(__name__)
 
-STATUS_NAMES = {OPER_STOPPED: "停止", OPER_RUNNING: "运行", OPER_PAUSED: "暂停"}
+STATUS_NAMES = {OPER_STOPPED: "停止", OPER_RUNNING: "运行"}
 CONTROL_MODE_NAMES = {CONTROL_OPEN: "开环", CONTROL_CLOSED: "闭环"}
 LOG_TYPE_NAMES = {
     LOG_INFO: "信息",
@@ -209,12 +208,13 @@ class OperatorMainWindow(QMainWindow):
     def __init__(
         self,
         database: Database,
-        runtime: OperatorRuntimeThreads | None = None,
+        runtime: OperatorProcessRuntime | None = None,
     ):
         super().__init__()
         self.database = database
         self.runtime = runtime
-        self._runtime_started = False
+        self._last_process_running: dict[str, bool] = {}
+        self._process_faults: dict[str, str] = {}
         self.current_value_edits: dict[str, QLineEdit] = {}
         self.current_value_cards: dict[str, QFrame] = {}
         self._home_curve_tree_signature: tuple[tuple[Any, ...], ...] = ()
@@ -270,8 +270,14 @@ class OperatorMainWindow(QMainWindow):
         if self.ui.mainTabs.currentIndex() in (1, 2, 4):
             self.periodic_page_timer.start()
         if self.runtime is not None:
-            self.runtime.start()
-            self._runtime_started = True
+            try:
+                self.runtime.start()
+            except Exception as exc:
+                LOGGER.exception("自动附着或启动 Core/IO 进程失败", exc_info=exc)
+                self.statusBar().showMessage(f"后台进程启动失败: {exc}", 10_000)
+                self._process_faults["core"] = str(exc)
+                self._process_faults["io"] = str(exc)
+            self.refresh_process_status(detect_unexpected_exit=False)
 
     def _install_plots(self) -> None:
         self.home_plot = InteractivePlot("系统运行曲线", self.ui.homePlotFrame)
@@ -325,7 +331,6 @@ class OperatorMainWindow(QMainWindow):
 
     def _connect_signals(self) -> None:
         self.ui.startButton.clicked.connect(lambda: self.set_control_status(OPER_RUNNING))
-        self.ui.pauseButton.clicked.connect(lambda: self.set_control_status(OPER_PAUSED))
         self.ui.stopButton.clicked.connect(lambda: self.set_control_status(OPER_STOPPED))
         self.ui.operStatusCombo.activated.connect(self.set_control_status)
         self.ui.controlModeCombo.currentIndexChanged.connect(
@@ -352,6 +357,24 @@ class OperatorMainWindow(QMainWindow):
         )
         self.ui.disconnectSimulatorButton.clicked.connect(
             lambda: self.set_io_connection_enabled(False)
+        )
+        self.ui.coreProcessStartButton.clicked.connect(
+            lambda: self.run_process_action("core", "start")
+        )
+        self.ui.coreProcessStopButton.clicked.connect(
+            lambda: self.run_process_action("core", "stop")
+        )
+        self.ui.coreProcessRestartButton.clicked.connect(
+            lambda: self.run_process_action("core", "restart")
+        )
+        self.ui.ioProcessStartButton.clicked.connect(
+            lambda: self.run_process_action("io", "start")
+        )
+        self.ui.ioProcessStopButton.clicked.connect(
+            lambda: self.run_process_action("io", "stop")
+        )
+        self.ui.ioProcessRestartButton.clicked.connect(
+            lambda: self.run_process_action("io", "restart")
         )
         self.ui.saveDevicesButton.clicked.connect(self.save_devices)
         self.ui.refreshDevicesButton.clicked.connect(self.manual_refresh_devices)
@@ -458,6 +481,15 @@ class OperatorMainWindow(QMainWindow):
             QPushButton#startButton { background: #3e7bfa; color: white; border-color: #3e7bfa; }
             QPushButton#connectSimulatorButton { color: #1b5e20; border-color: #81c784; }
             QPushButton#disconnectSimulatorButton { color: #b42318; border-color: #ef9a9a; }
+            QLabel#coreProcessStatusLabel, QLabel#ioProcessStatusLabel {
+                border: 1px solid #bdc8d6; border-radius: 4px; background: #eef2f6;
+                font-weight: 600;
+            }
+            QLabel#coreProcessPidLabel, QLabel#ioProcessPidLabel,
+            QLabel#coreProcessStartedLabel, QLabel#ioProcessStartedLabel {
+                color: #526579; font-family: Consolas, monospace;
+            }
+            QLabel#processHintLabel { color: #66788a; }
             QPushButton#connectSimulatorButton:disabled,
             QPushButton#disconnectSimulatorButton:disabled {
                 background: #f3f5f7; color: #9aa5b1; border-color: #d5dde7;
@@ -518,6 +550,132 @@ class OperatorMainWindow(QMainWindow):
         self.statusBar().showMessage(f"{title}: {exc}", 10_000)
         QMessageBox.critical(self, title, str(exc))
 
+    def _set_process_display(
+        self,
+        component: str,
+        *,
+        state: str,
+        pid: int | None,
+        started_at: int | None,
+        controls_enabled: bool,
+        details: str = "",
+    ) -> None:
+        status_label = getattr(self.ui, f"{component}ProcessStatusLabel")
+        pid_label = getattr(self.ui, f"{component}ProcessPidLabel")
+        started_label = getattr(self.ui, f"{component}ProcessStartedLabel")
+        start_button = getattr(self.ui, f"{component}ProcessStartButton")
+        stop_button = getattr(self.ui, f"{component}ProcessStopButton")
+        restart_button = getattr(self.ui, f"{component}ProcessRestartButton")
+        colors = {
+            "运行": ("#e8f5e9", "#1b5e20", "#81c784"),
+            "停止": ("#eef2f6", "#526579", "#bdc8d6"),
+            "异常": ("#fff1f0", "#b42318", "#ef9a9a"),
+            "未托管": ("#fff8e1", "#8a5a00", "#e8c765"),
+        }
+        background, foreground, border = colors[state]
+        status_label.setText(state)
+        status_label.setStyleSheet(
+            f"background: {background}; color: {foreground}; "
+            f"border: 1px solid {border}; border-radius: 4px; font-weight: 600;"
+        )
+        pid_label.setText(f"PID {pid}" if pid is not None else "PID --")
+        started_label.setText(
+            f"启动时间 {format_wall_time(started_at)}"
+            if started_at is not None
+            else "启动时间 --"
+        )
+        for widget in (status_label, pid_label, started_label):
+            widget.setToolTip(details)
+        running = state == "运行"
+        start_button.setEnabled(controls_enabled and not running)
+        stop_button.setEnabled(controls_enabled and running)
+        restart_button.setEnabled(controls_enabled)
+
+    def refresh_process_status(self, *, detect_unexpected_exit: bool = True) -> None:
+        if self.runtime is None:
+            for component in ("core", "io"):
+                self._set_process_display(
+                    component,
+                    state="未托管",
+                    pid=None,
+                    started_at=None,
+                    controls_enabled=False,
+                )
+            return
+        try:
+            snapshot = self.runtime.snapshot()
+        except Exception as exc:
+            LOGGER.exception("读取 Core/IO 进程状态失败", exc_info=exc)
+            for component in ("core", "io"):
+                self._set_process_display(
+                    component,
+                    state="异常",
+                    pid=None,
+                    started_at=None,
+                    controls_enabled=False,
+                )
+            self.statusBar().showMessage(f"后台进程状态读取失败: {exc}", 10_000)
+            return
+
+        for component in ("core", "io"):
+            service = snapshot[component]
+            running = bool(service.get("running"))
+            pid_value = service.get("pid")
+            pid = int(pid_value) if pid_value is not None else None
+            started_value = service.get("started_at")
+            started_at = int(started_value) if started_value is not None else None
+            previous = self._last_process_running.get(component)
+            if detect_unexpected_exit and previous is True and not running:
+                message = f"{component.upper()} 进程意外退出"
+                self._process_faults[component] = message
+                LOGGER.error(message)
+                self.statusBar().showMessage(message, 10_000)
+            if running:
+                self._process_faults.pop(component, None)
+            state = "运行" if running else (
+                "异常" if component in self._process_faults else "停止"
+            )
+            self._set_process_display(
+                component,
+                state=state,
+                pid=pid,
+                started_at=started_at,
+                controls_enabled=True,
+                details="\n".join(
+                    line
+                    for line in (
+                        f"入口: {service.get('script')}" if service.get("script") else "",
+                        f"数据库: {service.get('database')}" if service.get("database") else "",
+                        f"Python: {service.get('python')}" if service.get("python") else "",
+                    )
+                    if line
+                ),
+            )
+            self._last_process_running[component] = running
+
+    def run_process_action(self, component: str, action: str) -> None:
+        if component not in {"core", "io"} or action not in {
+            "start",
+            "stop",
+            "restart",
+        }:
+            raise ValueError(f"未知进程操作: {component}/{action}")
+        if self.runtime is None:
+            self.statusBar().showMessage("当前以仅界面模式运行，不能管理后台进程", 5000)
+            return
+        display_name = "Core" if component == "core" else "IO"
+        action_name = {"start": "启动", "stop": "停止", "restart": "重启"}[action]
+        try:
+            operation = getattr(self.runtime, f"{action}_{component}")
+            operation()
+            self._process_faults.pop(component, None)
+            self.refresh_process_status(detect_unexpected_exit=False)
+            self.statusBar().showMessage(f"{display_name} 进程{action_name}完成", 5000)
+        except Exception as exc:
+            self._process_faults[component] = str(exc)
+            self.refresh_process_status(detect_unexpected_exit=False)
+            self.show_error(f"{display_name} 进程{action_name}失败", exc)
+
     def show_success(self, message: str) -> None:
         self.statusBar().showMessage(message, 5000)
 
@@ -535,6 +693,9 @@ class OperatorMainWindow(QMainWindow):
 
     def set_control_status(self, status: int) -> None:
         try:
+            if status not in STATUS_NAMES:
+                raise ValueError(f"无效运行状态：{status}，只允许停止或运行")
+
             def update(session: Session) -> None:
                 control = session.get(OperatorControl, 1)
                 control.oper_status = status
@@ -594,7 +755,7 @@ class OperatorMainWindow(QMainWindow):
             oper_period = max(1, int(control.oper_period))
             previous_status_signals = self.ui.operStatusCombo.blockSignals(True)
             self.ui.operStatusCombo.setCurrentIndex(
-                max(0, min(2, control.oper_status))
+                control.oper_status if control.oper_status in STATUS_NAMES else OPER_STOPPED
             )
             self.ui.operStatusCombo.blockSignals(previous_status_signals)
             parameter_values = (
@@ -1735,6 +1896,7 @@ class OperatorMainWindow(QMainWindow):
 
     def refresh_live_data(self) -> None:
         try:
+            self.refresh_process_status()
             self.refresh_control()
             self.refresh_io_connection_status()
             if self.ui.mainTabs.currentIndex() == 0:
@@ -1744,6 +1906,7 @@ class OperatorMainWindow(QMainWindow):
             self.statusBar().showMessage(f"刷新失败: {exc}", 5000)
 
     def refresh_all(self) -> None:
+        self.refresh_process_status(detect_unexpected_exit=False)
         self.refresh_control()
         self.refresh_history_home()
         self.load_devices()
@@ -1755,15 +1918,8 @@ class OperatorMainWindow(QMainWindow):
     def closeEvent(self, event) -> None:  # noqa: N802
         self.refresh_timer.stop()
         self.periodic_page_timer.stop()
-        try:
-            if self.runtime is not None and self._runtime_started:
-                self.runtime.stop_and_wait()
-                self._runtime_started = False
-        except Exception:
-            LOGGER.exception("关闭 MMI 时停止 Core/IO 子线程失败")
-        finally:
-            self.database.dispose()
-            event.accept()
+        self.database.dispose()
+        event.accept()
 
 
 def main() -> None:
@@ -1772,14 +1928,15 @@ def main() -> None:
     parser.add_argument("--simulator-host", default="127.0.0.1")
     parser.add_argument("--simulator-port", type=int, default=9001)
     parser.add_argument("--rtu-id", type=int, default=1)
-    parser.add_argument("--poll", type=float, default=0.5, help="IO 子线程轮询周期（秒）")
-    parser.add_argument("--core-poll", type=float, default=0.5, help="Core 子线程轮询周期（秒）")
+    parser.add_argument("--poll", type=float, default=0.5, help="IO 进程轮询周期（秒）")
+    parser.add_argument("--core-poll", type=float, default=0.5, help="Core 进程轮询周期（秒）")
     parser.add_argument("--worker-start-timeout", type=float, default=10.0)
     parser.add_argument("--worker-stop-timeout", type=float, default=10.0)
     parser.add_argument(
         "--no-workers",
+        "--no-services",
         action="store_true",
-        help="仅启动界面，不启动 Core/IO 子线程（仅测试或维护使用）",
+        help="仅启动界面，不附着或启动 Core/IO 进程（仅测试或维护使用）",
     )
     args = parser.parse_args()
     instance_guard = SingleInstanceGuard()
@@ -1815,14 +1972,14 @@ def main() -> None:
         application = QApplication(sys.argv)
         application.setApplicationName("Power System Operator")
         if not args.no_workers:
-            runtime = OperatorRuntimeThreads(
+            runtime = OperatorProcessRuntime(
                 database_path=database.path,
                 simulator_host=args.simulator_host,
                 simulator_port=args.simulator_port,
                 rtu_id=args.rtu_id,
                 poll_seconds=max(0.05, args.poll),
                 core_poll_seconds=max(0.05, args.core_poll),
-                startup_timeout=max(0.1, args.worker_start_timeout),
+                start_timeout=max(0.1, args.worker_start_timeout),
                 stop_timeout=max(0.1, args.worker_stop_timeout),
             )
         window = OperatorMainWindow(database, runtime=runtime)
@@ -1831,11 +1988,6 @@ def main() -> None:
         QTimer.singleShot(250, lambda: ensure_window_visible(window))
         exit_code = application.exec()
     finally:
-        if runtime is not None:
-            try:
-                runtime.stop_and_wait()
-            except Exception:
-                LOGGER.exception("MMI 退出清理 Core/IO 子线程失败")
         if database is not None:
             database.dispose()
         instance_guard.release()

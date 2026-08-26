@@ -184,7 +184,14 @@ def test_mmi_constructs_all_pages_and_editors(tmp_path):
         assert not hasattr(window.ui, "currentValuesScroll")
         assert len(window.current_value_edits) == 17
         assert all(editor.text() == "--" for editor in window.current_value_edits.values())
-        assert window.ui.operStatusCombo.count() == 3
+        assert window.ui.operStatusCombo.count() == 2
+        assert [
+            window.ui.operStatusCombo.itemText(index)
+            for index in range(window.ui.operStatusCombo.count())
+        ] == ["停止", "运行"]
+        assert window.ui.startButton.text() == "启动"
+        assert window.ui.stopButton.text() == "停止"
+        assert not hasattr(window.ui, "pauseButton")
         assert window.ui.controlModeCombo.count() == 2
         assert window.ui.controlModeCombo.currentIndex() == CONTROL_CLOSED
         assert window.ui.dataPeriodSpin.value() == 3

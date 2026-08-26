@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from power_operator.core import CONTROL_CLOSED, OPER_PAUSED, OPER_RUNNING, OperatorCore
+from power_operator.core import CONTROL_CLOSED, OPER_RUNNING, OperatorCore
 from power_operator.database import Database, initialize_database
 from power_operator.models import (
     DevDiesalGen,
@@ -90,17 +90,6 @@ def test_core_cycle_refreshes_devices_dispatch_and_history(tmp_path):
         assert history.wind_power_set_sum + history.solar_power_set_sum == 110
         assert session.get(ScadaYt, 200001).time == 1
         assert session.query(ScadaYcHis).filter_by(time=1).count() == 5
-
-
-def test_core_tick_honors_paused_state(tmp_path):
-    db = Database(tmp_path / "ems.db")
-    initialize_database(db)
-    db.write(lambda session: setattr(session.get(OperatorControl, 1), "oper_status", OPER_PAUSED))
-
-    core = OperatorCore(db)
-    assert core.tick(monotonic_time=10) is None
-    with db.session() as session:
-        assert session.get(OperatorControl, 1).oper_time_curr == 0
 
 
 def test_wind_pmax_is_calculated_from_wind_speed_and_not_retired_yc(tmp_path):

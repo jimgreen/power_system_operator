@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 
+import pytest
 from sqlalchemy import inspect, text
+from sqlalchemy.exc import IntegrityError
 
 from power_operator.database import Database, initialize_database
-from power_operator.models import OperatorHistory, OperatorLog
+from power_operator.models import OperatorControl, OperatorHistory, OperatorLog
 
 
 EXPECTED_TABLES = {
@@ -91,6 +93,20 @@ def test_initialize_database_builds_required_schema(tmp_path):
         assert connection.execute(text("PRAGMA busy_timeout")).scalar_one() >= 5000
     indexes = {index["name"] for index in inspect(db.engine).get_indexes("scada_yc_his")}
     assert "ix_scada_yc_his_pnt_time" in indexes
+
+
+def test_operator_status_only_accepts_stopped_or_running(tmp_path):
+    db = Database(tmp_path / "ems.db")
+    initialize_database(db)
+
+    with pytest.raises(IntegrityError):
+        db.write(
+            lambda session: setattr(
+                session.get(OperatorControl, 1),
+                "oper_status",
+                2,
+            )
+        )
 
 
 def test_short_retried_transactions_allow_concurrent_writers(tmp_path):
@@ -209,7 +225,7 @@ def test_initialize_database_migrates_legacy_control_and_history_schema(tmp_path
             oper_time_curr INTEGER NOT NULL DEFAULT 0
         );
         INSERT INTO operator_control(id, oper_status, oper_period, oper_time_curr)
-        VALUES (1, 0, 3, 12);
+        VALUES (1, 2, 3, 12);
         CREATE TABLE scada_yc_his (
             simu_time INTEGER NOT NULL,
             pnt_no INTEGER NOT NULL,
@@ -248,12 +264,12 @@ def test_initialize_database_migrates_legacy_control_and_history_schema(tmp_path
     with database.engine.connect() as sql:
         row = sql.execute(
             text(
-                "SELECT control_status, io_connect_enabled, data_period, oper_period, "
+                "SELECT oper_status, control_status, io_connect_enabled, data_period, oper_period, "
                 "data_time_curr, oper_time_curr FROM operator_control WHERE id=1"
             )
         ).one()
         history = sql.execute(text("SELECT time, pnt_no, value FROM scada_yc_his")).one()
-    assert row == (0, 1, 1, 3, 0, 12)
+    assert row == (0, 0, 1, 1, 3, 0, 12)
     assert history == (12, 7, 1.5)
     assert "curve_def" not in inspect(database.engine).get_table_names()
 

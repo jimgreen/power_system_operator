@@ -95,6 +95,7 @@ class Database:
 def initialize_database(database: Database) -> None:
     migrated_control_mode_tables = _migrate_existing_schema(database)
     Base.metadata.create_all(database.engine)
+    _enforce_binary_operator_status(database)
     if migrated_control_mode_tables:
         with database.engine.begin() as connection:
             for table_name in migrated_control_mode_tables:
@@ -130,6 +131,36 @@ def initialize_database(database: Database) -> None:
                 )
             )
     database.write(seed)
+
+
+def _enforce_binary_operator_status(database: Database) -> None:
+    """Remove the retired paused value and reject non-binary status writes."""
+
+    with database.engine.begin() as connection:
+        connection.exec_driver_sql(
+            'UPDATE "operator_control" SET "oper_status" = 0 '
+            'WHERE "oper_status" NOT IN (0, 1) OR "oper_status" IS NULL'
+        )
+        connection.exec_driver_sql(
+            """
+            CREATE TRIGGER IF NOT EXISTS operator_control_oper_status_insert
+            BEFORE INSERT ON operator_control
+            WHEN NEW.oper_status NOT IN (0, 1)
+            BEGIN
+                SELECT RAISE(ABORT, 'oper_status only accepts 0 or 1');
+            END
+            """
+        )
+        connection.exec_driver_sql(
+            """
+            CREATE TRIGGER IF NOT EXISTS operator_control_oper_status_update
+            BEFORE UPDATE OF oper_status ON operator_control
+            WHEN NEW.oper_status NOT IN (0, 1)
+            BEGIN
+                SELECT RAISE(ABORT, 'oper_status only accepts 0 or 1');
+            END
+            """
+        )
 
 
 def _migrate_existing_schema(database: Database) -> tuple[str, ...]:
@@ -236,6 +267,10 @@ def _migrate_existing_schema(database: Database) -> tuple[str, ...]:
                     connection.exec_driver_sql(
                         f'ALTER TABLE "operator_control" ADD COLUMN "{name}" {definition}'
                     )
+            connection.exec_driver_sql(
+                'UPDATE "operator_control" SET "oper_status" = 0 '
+                'WHERE "oper_status" NOT IN (0, 1) OR "oper_status" IS NULL'
+            )
         expected_order = [
             "id",
             "oper_status",
@@ -262,7 +297,8 @@ def _migrate_existing_schema(database: Database) -> tuple[str, ...]:
                     """
                     CREATE TABLE operator_control__migrated (
                         id INTEGER NOT NULL PRIMARY KEY,
-                        oper_status INTEGER NOT NULL DEFAULT 0,
+                        oper_status INTEGER NOT NULL DEFAULT 0
+                            CHECK (oper_status IN (0, 1)),
                         control_status INTEGER NOT NULL DEFAULT 0,
                         io_connect_enabled INTEGER NOT NULL DEFAULT 1,
                         data_period INTEGER NOT NULL DEFAULT 1,

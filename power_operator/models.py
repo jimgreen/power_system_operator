@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Float, Index, Integer, String, Text
+from sqlalchemy import CheckConstraint, Float, Index, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -166,6 +166,12 @@ class OperatorHistory(Base):
 
 class OperatorControl(Base):
     __tablename__ = "operator_control"
+    __table_args__ = (
+        CheckConstraint(
+            "oper_status IN (0, 1)",
+            name="ck_operator_control_oper_status",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     oper_status: Mapped[int] = mapped_column(Integer, default=0)

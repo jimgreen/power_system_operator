@@ -77,13 +77,15 @@ def _process_matches(
     *,
     core_script: Path,
     database_path: Path,
+    python_executable: Path,
 ) -> bool:
     try:
         command = process.cmdline()
         working_directory = Path(process.cwd())
+        executable = Path(process.exe()).resolve()
     except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
         return False
-    if len(command) < 2:
+    if len(command) < 2 or not _same_path(executable, python_executable):
         return False
 
     script_matches = False
@@ -125,6 +127,7 @@ def core_pid_file(
         "pid": os.getpid(),
         "database": str(database),
         "script": str(script),
+        "python": str(Path(sys.executable).resolve()),
         "started_at": int(time.time()),
     }
     temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
@@ -188,6 +191,7 @@ class CoreProcessManager:
             process,
             core_script=self.core_script,
             database_path=self.database_path,
+            python_executable=self.python_executable,
         ):
             raise RuntimeError(
                 f"PID {pid} 不属于目标 operator_core，拒绝停止或覆盖该进程"
@@ -197,6 +201,35 @@ class CoreProcessManager:
     def running_pid(self) -> int | None:
         process = self._validated_process()
         return None if process is None else int(process.pid)
+
+    def process_info(self) -> dict[str, object]:
+        process = self._validated_process()
+        if process is None:
+            return {
+                "name": "operator_core",
+                "pid": None,
+                "running": False,
+                "started_at": None,
+                "script": str(self.core_script),
+                "database": str(self.database_path),
+                "python": str(self.python_executable),
+            }
+        record = _read_pid_record(self.pid_file)
+        started_at = record.get("started_at")
+        if not isinstance(started_at, (int, float)):
+            try:
+                started_at = int(process.create_time())
+            except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
+                started_at = None
+        return {
+            "name": "operator_core",
+            "pid": int(process.pid),
+            "running": True,
+            "started_at": int(started_at) if started_at is not None else None,
+            "script": str(self.core_script),
+            "database": str(self.database_path),
+            "python": str(self.python_executable),
+        }
 
     def stop_and_wait(self) -> None:
         process = self._validated_process()
@@ -235,7 +268,11 @@ class CoreProcessManager:
             "--pid-file",
             str(self.pid_file),
         ]
-        creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        creationflags = 0
+        if os.name == "nt":
+            creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) | int(
+                getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            )
         with stdout_path.open("ab") as stdout_file, stderr_path.open("ab") as stderr_file:
             child = subprocess.Popen(
                 command,
@@ -244,6 +281,7 @@ class CoreProcessManager:
                 stdout=stdout_file,
                 stderr=stderr_file,
                 creationflags=creationflags,
+                start_new_session=os.name != "nt",
             )
 
         deadline = time.monotonic() + self.start_timeout

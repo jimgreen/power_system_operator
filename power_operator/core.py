@@ -54,7 +54,6 @@ LOGGER = logging.getLogger(__name__)
 
 OPER_STOPPED = 0
 OPER_RUNNING = 1
-OPER_PAUSED = 2
 
 CONTROL_OPEN = 0
 CONTROL_CLOSED = 1
